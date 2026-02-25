@@ -1,0 +1,1155 @@
+export const API_BASE_URL = 'https://sm.plataformasvirtuales.pe/sk_demo/api/';
+
+// ---------------------------------------------------------------------------
+// Interfaces base
+// ---------------------------------------------------------------------------
+
+export interface SkambaResponse<T = any> {
+  success: boolean;
+  message: string;
+  data?: T;
+  meta?: any;
+  id?: number;
+  token?: string;
+}
+
+export interface SkambaResponseProyecto<T = any> {
+  success: boolean;
+  message: string;
+  pro_ide: number;
+}
+
+// ---------------------------------------------------------------------------
+// Interfaces de dominio
+// ---------------------------------------------------------------------------
+export interface Tarea {
+  tar_ide: string;
+  pro_ide: string;
+  tar_nom: string;
+  tar_des: string;
+  usu_des: string | null;
+  tar_gen: string;
+  tar_fch: string | null;
+  pri_ide: string | null;
+  est_ado: string;
+  tar_est: string;
+  p_t_ide: string | null;
+  tar_pad: string | null;
+  com_cnt?: number;
+  arc_cnt?: number;
+}
+
+export interface EstadoProyecto {
+  p_e_ide: string;
+  pro_ide: string;
+  est_ide: string;
+  est_ado: string;
+  est_nom: string;
+  color: string | null;
+  est_ord: string;
+}
+
+export interface Lista {
+  pro_ide: string;
+  pro_nom: string;
+  usu_ide: string;
+  pro_pad: string;
+  est_ado: string;
+  pro_tip: string;
+  tareas: Tarea[];
+  estados: EstadoProyecto[];
+}
+
+export interface Folder {
+  pro_ide: string;
+  pro_nom: string;
+  usu_ide: string;
+  pro_pad: string;
+  est_ado: string;
+  pro_tip: string;
+  listas: Lista[];
+}
+
+export interface Space {
+  pro_ide: string;
+  pro_nom: string;
+  usu_ide: string;
+  pro_pad: string;
+  est_ado: string;
+  pro_tip: string;
+  contenido: {
+    folders: Folder[];
+    listas: Lista[];
+  };
+}
+
+export interface Workspace {
+  pro_ide: string;
+  pro_nom: string;
+  usu_ide: string;
+  pro_pad: string;
+  est_ado: string;
+  pro_tip: string;
+  folders: Folder[];
+  spaces?: Space[];
+}
+
+export interface Estado {
+  est_ide: number;
+  est_nom: string;
+  est_ord: number;
+  color: string;
+}
+
+export interface Grupo {
+  gru_ide: number;
+  gru_nom: string;
+  usu_des: number;
+}
+
+export interface Miembro {
+  usu_ide: number;
+  usu_nom: string;
+  usu_ema: string;
+  g_e_ide: number;
+}
+
+export interface PlantillaTarea {
+  p_t_ide: number;
+  pla_ide: number;
+  p_t_nom: string;
+  p_t_pad: number;
+}
+
+export interface Plantilla {
+  pla_ide: number;
+  pla_nom: string;
+  usu_ide: number;
+  tareas: PlantillaTarea[];
+}
+
+export interface Comentario {
+  t_a_ide: number;
+  tar_ide: number;
+  t_c_com: string;
+  t_c_gen: string;
+  usu_ide: number;
+}
+
+export interface Archivo {
+  t_a_ide: number;
+  adj_ide: number;
+  fil_nam: string;
+  fil_ext: string;
+  fil_typ: string;
+  fil_siz: number;
+}
+
+// ---------------------------------------------------------------------------
+// Interfaces de respuesta tipadas
+// ---------------------------------------------------------------------------
+
+export interface SkambaResponseGetProyectos {
+  success: boolean;
+  data: Workspace[];
+}
+
+export interface LoginResponse {
+  usuario: any;
+  hoy: string;
+  id: number;
+}
+
+export interface LoginMeta {
+  usuario: any;
+  hoy: string;
+  token: string;
+}
+
+export interface CrearProyecto {
+  pro_pad: number;
+  pro_tip: string | null; //puede existir como no puede existir cuando pro_tip no existe crea un workspace
+  pro_nom: string;
+  usu_ide: number;
+}
+
+// ---------------------------------------------------------------------------
+// Helper interno
+// ---------------------------------------------------------------------------
+
+function authHeaders(token: string): Record<string, string> {
+  return { Authorization: token };
+}
+
+/** Convierte un objeto a URLSearchParams (el backend PHP lee $_POST). */
+function toForm(params: Record<string, any>): URLSearchParams {
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) {
+      form.append(key, String(value));
+    }
+  }
+  return form;
+}
+
+// ---------------------------------------------------------------------------
+// 1. Autenticación
+// ---------------------------------------------------------------------------
+
+export async function skambaLogin(
+  user: string,
+  pass: string,
+): Promise<SkambaResponse<LoginResponse>> {
+  const response = await fetch(`${API_BASE_URL}skambaLogin/`, {
+    method: 'POST',
+    body: new URLSearchParams({ user, pass }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error en la petición de login');
+  }
+
+  return response.json();
+}
+
+export async function skambaCreateUser(
+  usu_nom: string,
+  usu_ema: string,
+  usu_pas: string,
+  usu_tel: string,
+): Promise<SkambaResponse> {
+  const response = await fetch(`${API_BASE_URL}skambaCreateUser/`, {
+    method: 'POST',
+    body: new URLSearchParams({ usu_nom, usu_ema, usu_pas, usu_tel }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error en la petición de registro');
+  }
+
+  return response.json();
+}
+
+export async function skambaReLogin(token: string): Promise<{
+  success: boolean;
+  message: string;
+  token: string;
+  ses_ide: number;
+  usu_ide: number;
+  per_ide: number;
+}> {
+  const response = await fetch(`${API_BASE_URL}skambaReLogin/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({}),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al validar sesión');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 2. Proyectos
+// ---------------------------------------------------------------------------
+
+export async function skambaCrearProyecto(
+  pro_pad: number,
+  pro_nom: string,
+  usu_ide: number,
+  token: string,
+  pro_tip?: string,
+): Promise<SkambaResponseProyecto<CrearProyecto>> {
+  let finalProTip = pro_tip;
+
+  // Si no se envía pro_tip y pro_pad es 0 (o no se envía, asumiendo 0), es un workspace
+  if (!finalProTip && (pro_pad === 0 || !pro_pad)) {
+    finalProTip = 'workspace';
+  }
+
+  const body: Record<string, unknown> = { pro_pad, pro_nom, usu_ide };
+  if (finalProTip) body.pro_tip = finalProTip;
+
+  const response = await fetch(`${API_BASE_URL}skambaCrearProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(body),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error en la petición de crear proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaEditarProyecto(
+  token: string,
+  pro_ide: number,
+  pro_nom: string,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pro_ide, pro_nom }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirProyecto(
+  token: string,
+  pro_ide: number,
+): Promise<{ success: boolean; data: Lista | Folder | Workspace }> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pro_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirProyectos(
+  token: string,
+  usu_ide: number,
+): Promise<SkambaResponseGetProyectos> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirProyectos/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener proyectos');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 3. Tareas
+// ---------------------------------------------------------------------------
+
+export interface CrearTareaParams {
+  pro_ide: number;
+  tar_nom: string;
+  tar_des?: string;
+  usu_des?: number;
+  tar_fch?: string;
+  pri_ide?: number;
+  tar_est?: number;
+  tar_pad?: number;
+}
+
+export async function skambaCrearTarea(
+  token: string,
+  params: CrearTareaParams,
+): Promise<{ success: boolean; message: string; tar_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaCrearTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(params),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear tarea');
+  }
+
+  return response.json();
+}
+
+export interface EditarTareaParams {
+  tar_ide: number;
+  tar_nom?: string;
+  tar_des?: string;
+  usu_des?: number;
+  tar_fch?: string;
+  pri_ide?: number;
+  tar_est?: number;
+  tar_pad?: number;
+}
+
+export async function skambaEditarTarea(
+  token: string,
+  params: EditarTareaParams,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(params),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar tarea');
+  }
+
+  return response.json();
+}
+
+export async function skambaVerTareas(
+  token: string,
+  pro_ide: number,
+): Promise<{ success: boolean; data: Tarea[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaVerTareas/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pro_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al listar tareas');
+  }
+
+  return response.json();
+}
+
+export async function skambaVerTarea(
+  token: string,
+  tar_ide: number,
+): Promise<Tarea | null> {
+  const response = await fetch(`${API_BASE_URL}skambaVerTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ tar_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener tarea');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 4. Estados
+// ---------------------------------------------------------------------------
+
+export async function skambaCrearEstado(
+  token: string,
+  est_nom: string,
+  color: string,
+  est_ord?: number,
+): Promise<{ success: boolean; message: string; est_ide: number }> {
+  const body: Record<string, unknown> = { est_nom, color };
+  if (est_ord !== undefined) body.est_ord = est_ord;
+
+  const response = await fetch(`${API_BASE_URL}skambaCrearEstado/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(body),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear estado');
+  }
+
+  return response.json();
+}
+
+export interface EditarEstadoParams {
+  est_ide: number;
+  est_nom?: string;
+  est_ord?: number;
+  color?: string;
+}
+
+export async function skambaEditarEstado(
+  token: string,
+  params: EditarEstadoParams,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarEstado/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(params),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar estado');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarEstado(
+  token: string,
+  est_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarEstado/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ est_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar estado');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirEstados(
+  token: string,
+): Promise<{ success: boolean; data: Estado[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirEstados/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({}),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener estados');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirEstadosProyecto(
+  token: string,
+  pro_ide: number,
+): Promise<EstadoProyecto[]> {
+  const response = await fetch(
+    `${API_BASE_URL}skambaConseguirEstadosProyecto/`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: toForm({ pro_ide }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error('Error al obtener estados del proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaAgregarEstadoProyecto(
+  token: string,
+  pro_ide: number,
+  est_ide: number,
+): Promise<{ success: boolean; message: string; p_e_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaAgregarEstadoProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pro_ide, est_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al agregar estado al proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaQuitarEstadoProyecto(
+  token: string,
+  p_e_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaQuitarEstadoProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ p_e_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al quitar estado del proyecto');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 5. Grupos
+// ---------------------------------------------------------------------------
+
+export async function skambaCrearGrupo(
+  token: string,
+  gru_nom: string,
+  usu_des: number,
+): Promise<{ success: boolean; message: string; gru_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaCrearGrupo/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_nom, usu_des }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaEditarGrupo(
+  token: string,
+  gru_ide: number,
+  gru_nom: string,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarGrupo/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide, gru_nom }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarGrupo(
+  token: string,
+  gru_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarGrupo/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaAgregarMiembro(
+  token: string,
+  gru_ide: number,
+  usu_ide: number,
+): Promise<{ success: boolean; message: string; g_e_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaAgregarMiembro/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide, usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al agregar miembro al grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarMiembro(
+  token: string,
+  gru_ide: number,
+  usu_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarMiembro/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide, usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar miembro del grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirMiembros(
+  token: string,
+  gru_ide: number,
+): Promise<{ success: boolean; data: Miembro[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirMiembros/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener miembros del grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirGruposUsuario(
+  token: string,
+  usu_ide: number,
+): Promise<{ success: boolean; data: Grupo[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirGruposUsuario/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener grupos del usuario');
+  }
+
+  return response.json();
+}
+
+export async function skambaAgregarGrupoProyecto(
+  token: string,
+  gru_ide: number,
+  pro_ide: number,
+): Promise<{ success: boolean; message: string; gpp_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaAgregarGrupoProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide, pro_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al vincular grupo con proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarGrupoProyecto(
+  token: string,
+  gpp_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarGrupoProyecto/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gpp_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al desvincular grupo del proyecto');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirProyectosGrupo(
+  token: string,
+  usu_ide: number,
+  gru_ide: number,
+): Promise<{
+  success: boolean;
+  data: {
+    pro_ide: number;
+    pro_nom: string;
+    pro_tip: string;
+    gpp_ide: number;
+  }[];
+}> {
+  const response = await fetch(
+    `${API_BASE_URL}skambaConseguirProyectosGrupo/`,
+    {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: toForm({ usu_ide, gru_ide }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error('Error al obtener proyectos del grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirProyectosUsuarios(
+  token: string,
+  usu_ide: number,
+): Promise<SkambaResponseGetProyectos> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirProyectosUsuarios/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener proyectos del usuario en grupo');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirProyectosUsuario(
+  token: string,
+  usu_ide: number,
+): Promise<SkambaResponseGetProyectos> {
+  const response = await fetch(
+    `${API_BASE_URL}skambaConseguirProyectosUsuario/?usu_ide=${usu_ide}`,
+    {
+      method: 'GET',
+      headers: authHeaders(token),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error('Error al obtener workspaces del usuario miembro');
+  }
+
+  return response.json();
+}
+
+export async function skambaAgregarUsuarioProyectoMiembro(
+  token: string,
+  gru_ide: number,
+  usu_ide: number,
+  pro_ide: number,
+): Promise<{ success: boolean; message: string; p_m_ide: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaAgregarUsuarioProyectoMiembro/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ gru_ide, usu_ide, pro_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al agregar usuario al proyecto miembro');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 6. Plantillas
+// ---------------------------------------------------------------------------
+
+export async function skambaCrearPlantilla(
+  token: string,
+  pla_nom: string,
+  usu_ide: number,
+): Promise<{ success: boolean; message: string; pla_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaCrearPlantilla/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pla_nom, usu_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaEditarPlantilla(
+  token: string,
+  pla_ide: number,
+  pla_nom: string,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarPlantilla/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pla_ide, pla_nom }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarPlantilla(
+  token: string,
+  pla_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarPlantilla/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pla_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaCrearPlantillaTarea(
+  token: string,
+  pla_ide: number,
+  p_t_nom: string,
+  p_t_pad?: number,
+): Promise<{ success: boolean; message: string; p_t_ide: number }> {
+  const body: Record<string, unknown> = { pla_ide, p_t_nom };
+  if (p_t_pad !== undefined) body.p_t_pad = p_t_pad;
+
+  const response = await fetch(`${API_BASE_URL}skambaCrearPlantillaTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm(body),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear tarea de plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaEditarPlantillaTarea(
+  token: string,
+  p_t_ide: number,
+  p_t_nom: string,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEditarPlantillaTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ p_t_ide, p_t_nom }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al editar tarea de plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarPlantillaTarea(
+  token: string,
+  p_t_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarPlantillaTarea/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ p_t_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar tarea de plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaMostrarPlantillas(
+  token: string,
+): Promise<{ success: boolean; data: Plantilla[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaMostrarPlantillas/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({}),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al listar plantillas');
+  }
+
+  return response.json();
+}
+
+export async function skambaMostrarPlantilla(
+  token: string,
+  pla_ide: number,
+): Promise<{ success: boolean; data: Plantilla }> {
+  const response = await fetch(`${API_BASE_URL}skambaMostrarPlantilla/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pla_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener plantilla');
+  }
+
+  return response.json();
+}
+
+export async function skambaAplicarPlantilla(
+  token: string,
+  pla_ide: number,
+  pro_ide: number,
+): Promise<{ success: boolean; message: string; tareas: number[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaAplicarPlantilla/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ pla_ide, pro_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al aplicar plantilla');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 7. Comentarios
+// ---------------------------------------------------------------------------
+
+export async function skambaHacerComentario(
+  token: string,
+  tar_ide: number,
+  t_c_com: string,
+): Promise<{
+  success: boolean;
+  message: string;
+  t_a_ide: number;
+  tar_ide: number;
+}> {
+  const response = await fetch(`${API_BASE_URL}skambaHacerComentario/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ tar_ide, t_c_com }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al crear comentario');
+  }
+
+  return response.json();
+}
+
+export async function skambaTareaComentarios(
+  token: string,
+  tar_ide: number,
+): Promise<{ success: boolean; comentarios: Comentario[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaTareaComentarios/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ tar_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener comentarios');
+  }
+
+  return response.json();
+}
+
+export async function skambaEliminarComentario(
+  token: string,
+  t_a_ide: number,
+): Promise<{ success: boolean; message: string; t_a_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarComentario/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ t_a_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar comentario');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 8. Archivos
+// ---------------------------------------------------------------------------
+
+export async function skambaSubirArchivo(
+  token: string,
+  tar_ide: number,
+  files: File[],
+): Promise<{
+  success: boolean;
+  message: string;
+  archivos: { t_a_ide: number; adj_ide: number }[];
+}> {
+  // FormData: NO se agrega Content-Type, el browser lo pone con el boundary
+  const formData = new FormData();
+  formData.append('tar_ide', String(tar_ide));
+  files.forEach((file) => formData.append('files', file));
+
+  const response = await fetch(`${API_BASE_URL}skambaSubirArchivo/`, {
+    method: 'POST',
+    headers: { Authorization: token },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al subir archivo');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirArchivos(
+  token: string,
+  tar_ide: number,
+): Promise<{ success: boolean; archivos: Archivo[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirArchivos/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ tar_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener archivos');
+  }
+
+  return response.json();
+}
+
+export async function skambaConseguirArchivo(
+  token: string,
+  adj_ide: number,
+): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}skambaConseguirArchivo/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ adj_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al descargar archivo');
+  }
+
+  return response.blob();
+}
+
+export async function skambaEliminarArchivo(
+  token: string,
+  t_a_ide: number,
+): Promise<{ success: boolean; message: string; t_a_ide: number }> {
+  const response = await fetch(`${API_BASE_URL}skambaEliminarArchivo/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({ t_a_ide }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al eliminar archivo');
+  }
+
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// 9. Usuarios
+// ---------------------------------------------------------------------------
+
+export interface Usuario {
+  usu_ide: number;
+  usu_nom: string;
+}
+
+export async function skambaUsuarios(
+  token: string,
+): Promise<{ success: boolean; data: Usuario[] }> {
+  const response = await fetch(`${API_BASE_URL}skambaUsuarios/`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: toForm({}),
+  });
+
+  if (!response.ok) {
+    throw new Error('Error al obtener usuarios');
+  }
+
+  const payload = await response.json();
+  const usuarios = payload?.data ?? payload?.usuarios ?? [];
+
+  return {
+    success: Boolean(payload?.success),
+    data: Array.isArray(usuarios) ? usuarios : [],
+  };
+}

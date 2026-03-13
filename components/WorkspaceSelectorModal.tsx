@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Workspace, skambaConseguirProyectos } from '../lib/api';
+import { useAuthStore } from '../context/useAuthStore';
 
 interface WorkspaceSelectorModalProps {
     isOpen: boolean;
@@ -22,11 +23,11 @@ export function WorkspaceSelectorModal({ isOpen, onClose, onSelect, adding = fal
         }
     }, [isOpen]);
 
-    async function loadWorkspaces() {
-        const token = localStorage.getItem('sk_token') ?? '';
-        const usu_ide = Number(localStorage.getItem('sk_usu_ide') ?? '0');
+    const { user: storeUser } = useAuthStore();
+    const usu_ide = storeUser?.usu_ide ?? 0;
 
-        if (!token || !usu_ide) {
+    async function loadWorkspaces() {
+        if (!usu_ide) {
             setError('No se pudo autenticar');
             return;
         }
@@ -34,7 +35,7 @@ export function WorkspaceSelectorModal({ isOpen, onClose, onSelect, adding = fal
         setLoading(true);
         setError('');
         try {
-            const res = await skambaConseguirProyectos(token, usu_ide);
+            const res = await skambaConseguirProyectos('');
             if (res.success && res.data) {
                 // Filtrar solo workspaces (pro_tip === 'workspace')
                 const workspaces = res.data.filter(w => w.pro_tip === 'workspace');

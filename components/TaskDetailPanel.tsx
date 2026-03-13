@@ -17,6 +17,8 @@ import {
     skambaConseguirArchivo,
     skambaUsuarios,
     skambaVerTareas,
+    skambaLogsTareas,
+    type TareaLog,
 } from '../lib/api';
 import { QuillEditor } from './QuillEditor';
 
@@ -30,7 +32,12 @@ interface TaskDetailPanelProps {
 export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetailPanelProps) {
     const [activeTab, setActiveTab] = useState<'detalle' | 'comentarios' | 'archivos'>('detalle');
     const [saving, setSaving] = useState(false);
+    const [isMaximized, setIsMaximized] = useState(false);
     const [error, setError] = useState('');
+
+    const [logs, setLogs] = useState<TareaLog[]>([]);
+    const [showLogs, setShowLogs] = useState(false);
+    const [logsLoading, setLogsLoading] = useState(false);
     const priorityOptions = [
         { id: '1', label: 'Alta', color: 'text-red-600', bg: 'bg-red-100' },
         { id: '2', label: 'Media', color: 'text-amber-600', bg: 'bg-amber-100' },
@@ -43,7 +50,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     };
 
     // Editable fields
-    const [nombre, setNombre] = useState(tarea.tar_nom);
+    const [nombre, setNombre] = useState(tarea.tar_nom ?? '');
     const [descripcion, setDescripcion] = useState(tarea.tar_des || '');
     const [fecha, setFecha] = useState(tarea.tar_fch || '');
     const [estadoId, setEstadoId] = useState(tarea.tar_est);
@@ -64,28 +71,26 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     const [archivos, setArchivos] = useState<Archivo[]>([]);
     const [filesLoading, setFilesLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    function getToken() {
-        return localStorage.getItem('sk_token') ?? '';
-    }
 
     useEffect(() => {
-        skambaUsuarios(getToken())
+        skambaUsuarios('')
             .then(res => { if (res.success) setUsuarios(Array.isArray(res.data) ? res.data : []); })
             .catch(() => { });
     }, []);
 
     useEffect(() => {
         setTareasLoading(true);
-        skambaVerTareas(getToken(), Number(tarea.pro_ide))
+        skambaVerTareas('', Number(tarea.pro_ide))
             .then(res => { if (res.success) setTareas(res.data); })
             .catch(() => { })
             .finally(() => setTareasLoading(false));
     }, [tarea.pro_ide, tarea.tar_ide]);
 
     useEffect(() => {
-        setNombre(tarea.tar_nom);
+        setNombre(tarea.tar_nom ?? '');
         setDescripcion(tarea.tar_des || '');
         setFecha(tarea.tar_fch || '');
         setEstadoId(tarea.tar_est);
@@ -103,7 +108,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     async function loadComments() {
         setCommentsLoading(true);
         try {
-            const res = await skambaTareaComentarios(getToken(), Number(tarea.tar_ide));
+            const res = await skambaTareaComentarios('', Number(tarea.tar_ide));
             console.log('skambaTareaComentarios response:', JSON.stringify(res));
             if (res.success) {
                 setComentarios(res.comentarios ?? []);
@@ -122,10 +127,20 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     async function loadFiles() {
         setFilesLoading(true);
         try {
-            const res = await skambaConseguirArchivos(getToken(), Number(tarea.tar_ide));
+            const res = await skambaConseguirArchivos('', Number(tarea.tar_ide));
             if (res.success) setArchivos(res.archivos);
         } catch { /* ignore */ } finally {
             setFilesLoading(false);
+        }
+    }
+
+    async function loadLogs() {
+        setLogsLoading(true);
+        try {
+            const res = await skambaLogsTareas('', Number(tarea.tar_ide));
+            if (res.success) setLogs(res.data ?? []);
+        } catch { } finally {
+            setLogsLoading(false);
         }
     }
 
@@ -133,7 +148,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         setSaving(true);
         setError('');
         try {
-            const res = await skambaEditarTarea(getToken(), {
+            const res = await skambaEditarTarea('', {
                 tar_ide: Number(tarea.tar_ide),
                 tar_nom: nombre.trim() || undefined,
                 tar_des: descripcion,
@@ -160,7 +175,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         if (!newComment.trim()) return;
         setAddingComment(true);
         try {
-            const res = await skambaHacerComentario(getToken(), Number(tarea.tar_ide), newComment.trim());
+            const res = await skambaHacerComentario('', Number(tarea.tar_ide), newComment.trim());
             if (res.success) {
                 setNewComment('');
                 await loadComments();
@@ -172,17 +187,16 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
 
     async function handleDeleteComment(t_a_ide: number) {
         try {
-            await skambaEliminarComentario(getToken(), t_a_ide);
+            await skambaEliminarComentario('', t_a_ide);
             await loadComments();
         } catch { /* ignore */ }
     }
 
-    async function handleUploadFiles(e: React.ChangeEvent<HTMLInputElement>) {
-        const files = e.target.files;
+    async function uploadFiles(files: FileList | File[]) {
         if (!files || files.length === 0) return;
         setUploading(true);
         try {
-            await skambaSubirArchivo(getToken(), Number(tarea.tar_ide), Array.from(files));
+            await skambaSubirArchivo('', Number(tarea.tar_ide), Array.from(files));
             await loadFiles();
         } catch { /* ignore */ } finally {
             setUploading(false);
@@ -190,16 +204,39 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         }
     }
 
+    async function handleUploadFiles(e: React.ChangeEvent<HTMLInputElement>) {
+        const files = e.target.files;
+        if (files) await uploadFiles(files);
+    }
+
+    function handleDrop(e: React.DragEvent) {
+        e.preventDefault();
+        setIsDragging(false);
+        if (e.dataTransfer.files.length > 0) {
+            uploadFiles(e.dataTransfer.files);
+        }
+    }
+
+    function handleDragOver(e: React.DragEvent) {
+        e.preventDefault();
+        setIsDragging(true);
+    }
+
+    function handleDragLeave(e: React.DragEvent) {
+        e.preventDefault();
+        setIsDragging(false);
+    }
+
     async function handleDeleteFile(t_a_ide: number) {
         try {
-            await skambaEliminarArchivo(getToken(), t_a_ide);
+            await skambaEliminarArchivo('', t_a_ide);
             await loadFiles();
         } catch { /* ignore */ }
     }
 
     async function handleDownloadFile(adj_ide: number, fil_nam: string) {
         try {
-            const blob = await skambaConseguirArchivo(getToken(), adj_ide);
+            const blob = await skambaConseguirArchivo('', adj_ide);
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -214,7 +251,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     return (
         <div className="fixed inset-0 bg-black/40 flex items-start justify-end z-50" onClick={onClose}>
             <div
-                className="h-full w-full max-w-lg bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col animate-in slide-in-from-right"
+                className={`h-full ${isMaximized ? 'w-full' : 'w-full max-w-3xl'} bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col animate-in slide-in-from-right transition-all duration-300`}
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -224,42 +261,149 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: currentEstado.color ?? '#a1a1aa' }} />
                         )}
                         {priId && (
-                            <span className={`inline-flex items-center ${priorityStyles[priId] ?? 'text-zinc-400'}`} title={`Prioridad ${priId}`}>
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                    <path d="M6 3h9.5a1 1 0 01.8.4l1.7 2.3a1 1 0 010 1.2l-1.7 2.3a1 1 0 01-.8.4H8v10a1 1 0 01-2 0V3z" />
-                                </svg>
-                            </span>
+                            <div className="relative group/logs inline-flex items-center">
+                                <span className={`inline-flex items-center ${priorityStyles[priId] ?? 'text-zinc-400'} cursor-help`} title={`Prioridad ${priId}`} onMouseEnter={() => loadLogs()}>
+                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                        <path d="M6 3h9.5a1 1 0 01.8.4l1.7 2.3a1 1 0 010 1.2l-1.7 2.3a1 1 0 01-.8.4H8v10a1 1 0 01-2 0V3z" />
+                                    </svg>
+                                </span>
+                                {/* Mini logs dropdown next to priority */}
+                                <div className="absolute left-0 top-full mt-2 w-80 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-700 p-3 hidden group-hover/logs:block z-[70] max-h-64 overflow-y-auto">
+                                    <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 px-1">Historial</h4>
+                                    {logsLoading ? (
+                                        <p className="text-xs text-zinc-400 py-2 text-center">Cargando...</p>
+                                    ) : logs.length === 0 ? (
+                                        <p className="text-xs text-zinc-400 py-2 text-center italic">Sin cambios aún</p>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {logs.map(log => {
+                                                const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
+                                                const estado = estados.find(e => String(e.p_e_ide) === String(log.tar_est));
+                                                return (
+                                                    <div key={log.t_e_ide} className="flex gap-2 text-left">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-[11px] text-zinc-700 dark:text-zinc-300 leading-snug">
+                                                                <span className="font-semibold">{autor?.usu_nom ?? `User#${log.usu_ide}`}</span>
+                                                                {' movió a '}
+                                                                <span className="font-semibold text-indigo-500">{estado?.est_nom ?? `Estado#${log.tar_est}`}</span>
+                                                            </p>
+                                                            <p className="text-[9px] text-zinc-400 mt-0.5">{log.t_e_tim}</p>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         )}
                         <h2 className="text-base font-semibold text-zinc-900 dark:text-white truncate">{tarea.tar_nom}</h2>
                     </div>
-                    <button onClick={onClose} className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 transition-colors">
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
+                    <div className="flex items-center gap-1">
+                        {/* Maximize/Minimize */}
+                        <button
+                            type="button"
+                            onClick={() => setIsMaximized(!isMaximized)}
+                            className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+                            title={isMaximized ? "Restaurar" : "Maximizar"}
+                        >
+                            {isMaximized ? (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6m-1 7H4a2 2 0 00-2 2v6a2 2 0 002 2h8a2 2 0 002-2v-3" />
+                                </svg>
+                            ) : (
+                                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                </svg>
+                            )}
+                        </button>
+                        <button onClick={onClose} className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 transition-colors">
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
                 </div>
+
+                {/* ── LOGS POPUP ── */}
+                {showLogs && (
+                    <div
+                        className="fixed inset-0 bg-black/40 flex items-center justify-center z-60 p-4"
+                        onClick={() => setShowLogs(false)}
+                    >
+                        <div
+                            className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-md border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+                                <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Historial de cambios
+                                </h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLogs(false)}
+                                    className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </div>
+                            <div className="max-h-80 overflow-y-auto px-5 py-4">
+                                {logsLoading ? (
+                                    <p className="text-sm text-zinc-400 text-center py-6">Cargando...</p>
+                                ) : logs.length === 0 ? (
+                                    <p className="text-sm text-zinc-400 italic text-center py-6">Sin historial aún</p>
+                                ) : (
+                                    <ol className="relative border-l border-zinc-200 dark:border-zinc-700 space-y-4">
+                                        {logs.map(log => {
+                                            const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
+                                            const estado = estados.find(e => String(e.p_e_ide) === String(log.tar_est));
+                                            return (
+                                                <li key={log.t_e_ide} className="ml-4">
+                                                    <div className="absolute -left-1.5 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white dark:border-zinc-900" />
+                                                    <p className="text-xs text-zinc-400 mb-0.5">{log.t_e_tim}</p>
+                                                    <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                                                        <span className="font-medium">{autor?.usu_nom ?? `Usuario #${log.usu_ide}`}</span>
+                                                        {' cambió el estado a '}
+                                                        <span
+                                                            className="inline-block px-1.5 py-0.5 rounded text-xs font-semibold text-white"
+                                                            style={{ backgroundColor: estado?.color ?? '#a1a1aa' }}
+                                                        >
+                                                            {estado?.est_nom ?? `#${log.tar_est}`}
+                                                        </span>
+                                                    </p>
+                                                </li>
+                                            );
+                                        })}
+                                    </ol>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tabs */}
                 <div className="flex border-b border-zinc-200 dark:border-zinc-800 px-5 shrink-0">
                     {(['detalle', 'comentarios', 'archivos'] as const).map(tab => {
                         const badge =
                             tab === 'comentarios' && comentarios.length > 0 ? comentarios.length
-                            : tab === 'archivos' && archivos.length > 0 ? archivos.length
-                            : null;
+                                : tab === 'archivos' && archivos.length > 0 ? archivos.length
+                                    : null;
                         return (
-                        <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab)}
-                            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === tab
-                                ? 'border-indigo-600 text-indigo-600'
-                                : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-                                }`}
-                        >
-                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                            {badge !== null && (
-                                <span className={`inline-flex items-center justify-center rounded-full text-[10px] font-bold tabular-nums leading-none px-1.5 py-0.5 ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'}`}>
-                                    {badge}
-                                </span>
-                            )}
-                        </button>
+                            <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === tab
+                                    ? 'border-indigo-600 text-indigo-600'
+                                    : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                                    }`}
+                            >
+                                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                {badge !== null && (
+                                    <span className={`inline-flex items-center justify-center rounded-full text-[10px] font-bold tabular-nums leading-none px-1.5 py-0.5 ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'}`}>
+                                        {badge}
+                                    </span>
+                                )}
+                            </button>
                         );
                     })}
                 </div>
@@ -398,7 +542,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                 </button>
                                             </div>
-                                            <p className="text-[10px] text-zinc-400 mt-1.5">{c.t_c_gen} &middot; {usuarios.find(u => u.usu_ide === c.usu_ide)?.usu_nom ?? `Usuario ${c.usu_ide}`}</p>
+                                            <p className="text-[10px] text-zinc-400 mt-1.5">{c.t_c_gen} &middot; {usuarios.find(u => Number(u.usu_ide) === Number(c.usu_ide))?.usu_nom ?? 'Usuario'}</p>
                                         </div>
                                     ))
                                 )}
@@ -438,16 +582,32 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                     className="hidden"
                                     id="file-upload"
                                 />
-                                <label
-                                    htmlFor="file-upload"
-                                    className={`flex items-center justify-center gap-2 w-full px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${uploading
-                                        ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 opacity-50'
-                                        : 'border-zinc-300 dark:border-zinc-700 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10'
+                                <div
+                                    onDrop={handleDrop}
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onClick={() => !uploading && fileInputRef.current?.click()}
+                                    className={`flex flex-col items-center justify-center gap-3 w-full px-4 py-8 border-2 border-dashed rounded-lg cursor-pointer transition-all ${uploading
+                                        ? 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 opacity-50 cursor-wait'
+                                        : isDragging
+                                            ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-900/20'
+                                            : 'border-zinc-300 dark:border-zinc-700 hover:border-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/10'
                                         }`}
                                 >
-                                    <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                                    <span className="text-sm text-zinc-500">{uploading ? 'Subiendo...' : 'Subir archivos'}</span>
-                                </label>
+                                    <svg className={`w-8 h-8 ${isDragging ? 'text-indigo-500' : 'text-zinc-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                                    </svg>
+                                    <div className="text-center">
+                                        <p className={`text-sm font-medium ${isDragging ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                                            {uploading ? 'Subiendo archivos...' : isDragging ? 'Suelta los archivos aquí' : 'Arrastra archivos aquí'}
+                                        </p>
+                                        {!uploading && (
+                                            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+                                                o haz clic para seleccionar
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Files list */}

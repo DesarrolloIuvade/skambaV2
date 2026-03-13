@@ -13,6 +13,7 @@ import {
     skambaUsuarios,
     skambaAgregarUsuarioProyectoMiembro,
 } from '../lib/api';
+import { useAuthStore } from '../context/useAuthStore';
 import { useDashboard } from '../context/DashboardContext';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
@@ -55,17 +56,14 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     const [createListaId, setCreateListaId] = useState<string>('');
     const [showCreateModal, setShowCreateModal] = useState(false);
 
-    const spaces = workspace.spaces ?? [];
-    const folders =
-        spaces.length > 0
-            ? spaces.flatMap((s) => s.contenido?.folders ?? [])
-            : workspace.folders;
+    const spaces = workspace.spaces;
+    const folders = spaces.flatMap((s) => s.contenido?.folders ?? []);
 
     // Flatten all lists with breadcrumb path
     const listsWithPaths: Array<Lista & { path: string }> = [];
     spaces.forEach((space) => {
         (space.contenido?.listas ?? []).forEach((lista) =>
-            listsWithPaths.push({ ...lista, path: `${space.pro_nom}` }),
+            listsWithPaths.push({ ...lista, path: space.pro_nom }),
         );
         (space.contenido?.folders ?? []).forEach((folder) =>
             folder.listas.forEach((lista) =>
@@ -73,13 +71,6 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
             ),
         );
     });
-    if (spaces.length === 0) {
-        folders.forEach((folder) =>
-            folder.listas.forEach((lista) =>
-                listsWithPaths.push({ ...lista, path: folder.pro_nom }),
-            ),
-        );
-    }
 
     // Build flat task rows categorized by individual task status
     const taskRows: TaskRow[] = listsWithPaths.flatMap((lista) =>
@@ -119,21 +110,22 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     const [adding, setAdding] = useState(false);
     const [addError, setAddError] = useState('');
 
+    const { user: storeUser } = useAuthStore();
+    const usuIde = storeUser?.usu_ide ?? 0;
+
     const loadMembers = useCallback(async () => {
-        const token = localStorage.getItem('sk_token') ?? '';
-        const usuIde = Number(localStorage.getItem('sk_usu_ide'));
-        if (!token || !usuIde) return;
+        if (!usuIde) return;
 
         setLoadingMembers(true);
         try {
             const proIde = Number(workspace.pro_ide);
             const [gruposRes, usersRes] = await Promise.all([
-                skambaConseguirGruposUsuario(token, usuIde),
-                skambaUsuarios(token),
+                skambaConseguirGruposUsuario('', usuIde),
+                skambaUsuarios(''),
             ]);
             const grupos = gruposRes.data ?? [];
             const proyResults = await Promise.all(
-                grupos.map((g) => skambaConseguirProyectosGrupo(token, usuIde, g.gru_ide)),
+                grupos.map((g) => skambaConseguirProyectosGrupo('', usuIde, g.gru_ide)),
             );
             const filtered: GrupoConWs[] = grupos
                 .filter((_g, i) => proyResults[i].data?.some((p) => p.pro_ide === proIde))
@@ -145,7 +137,7 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
 
             if (filtered.length > 0) {
                 const memberSets = await Promise.all(
-                    filtered.map((g) => skambaConseguirMiembros(token, g.gru_ide)),
+                    filtered.map((g) => skambaConseguirMiembros('', g.gru_ide)),
                 );
                 const map = new Map<number, Miembro>();
                 memberSets.forEach((r) => r.data?.forEach((m) => map.set(m.usu_ide, m)));
@@ -167,12 +159,11 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
 
     const handleAddUser = async () => {
         if (!selectedUserId || !selectedGruIde) return;
-        const token = localStorage.getItem('sk_token') ?? '';
         setAdding(true);
         setAddError('');
         try {
             const res = await skambaAgregarUsuarioProyectoMiembro(
-                token,
+                '',
                 Number(selectedGruIde),
                 Number(selectedUserId),
                 Number(workspace.pro_ide),

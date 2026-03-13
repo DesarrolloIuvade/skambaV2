@@ -35,11 +35,10 @@ export default function EstadosPage() {
     }, []);
 
     async function loadEstados() {
-        const token = localStorage.getItem('sk_token') ?? '';
         setLoading(true);
         setError('');
         try {
-            const res = await skambaConseguirEstados(token);
+            const res = await skambaConseguirEstados('');
             if (res.success) {
                 setEstados(res.data);
             }
@@ -53,10 +52,9 @@ export default function EstadosPage() {
     async function handleCreate(e: React.FormEvent) {
         e.preventDefault();
         if (!newName.trim()) return;
-        const token = localStorage.getItem('sk_token') ?? '';
         setCreating(true);
         try {
-            const res = await skambaCrearEstado(token, newName.trim(), newColor, newOrd ? Number(newOrd) : undefined);
+            const res = await skambaCrearEstado('', newName.trim(), newColor, newOrd ? Number(newOrd) : undefined);
             if (res.success) {
                 setNewName('');
                 setNewColor(PRESET_COLORS[0]);
@@ -80,10 +78,9 @@ export default function EstadosPage() {
 
     async function handleSaveEdit() {
         if (editingId === null) return;
-        const token = localStorage.getItem('sk_token') ?? '';
         setSaving(true);
         try {
-            await skambaEditarEstado(token, {
+            await skambaEditarEstado('', {
                 est_ide: editingId,
                 est_nom: editName.trim() || undefined,
                 color: editColor || undefined,
@@ -99,9 +96,8 @@ export default function EstadosPage() {
     }
 
     async function handleDelete(est_ide: number) {
-        const token = localStorage.getItem('sk_token') ?? '';
         try {
-            await skambaEliminarEstado(token, est_ide);
+            await skambaEliminarEstado('', est_ide);
             await loadEstados();
         } catch {
             setError('Error al eliminar estado');

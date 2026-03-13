@@ -1,24 +1,16 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
+import { toForm } from './base';
 import type { Usuario } from '../types/usuario';
 
-// ------------------------------
-// Usuarios
-// ------------------------------
+/**
+ * Usuarios API refactored to use apiClient.
+ */
 
 export async function skambaUsuarios(
-  token: string,
+  _token: string,
 ): Promise<{ success: boolean; data: Usuario[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaUsuarios/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({}),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al obtener usuarios');
-  }
-
-  const payload = await response.json();
+  const response = await apiClient.post('skambaUsuarios/', toForm({}));
+  const payload = response.data;
   const usuarios = payload?.data ?? payload?.usuarios ?? [];
 
   return {

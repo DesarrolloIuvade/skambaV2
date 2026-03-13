@@ -1,12 +1,13 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
+import { toForm } from './base';
 import type { Estado, EstadoProyecto } from '../types/tarea';
 
 // ------------------------------
-// Estados
+// Estados (Refactored to use apiClient)
 // ------------------------------
 
 export async function skambaCrearEstado(
-  token: string,
+  _token: string,
   est_nom: string,
   color: string,
   est_ord?: number,
@@ -14,17 +15,8 @@ export async function skambaCrearEstado(
   const body: Record<string, unknown> = { est_nom, color };
   if (est_ord !== undefined) body.est_ord = est_ord;
 
-  const response = await fetch(`${API_BASE_URL}skambaCrearEstado/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm(body),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al crear estado');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaCrearEstado/', toForm(body));
+  return response.data;
 }
 
 export interface EditarEstadoParams {
@@ -35,106 +27,65 @@ export interface EditarEstadoParams {
 }
 
 export async function skambaEditarEstado(
-  token: string,
+  _token: string,
   params: EditarEstadoParams,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEditarEstado/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm(params),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al editar estado');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaEditarEstado/', toForm(params));
+  return response.data;
 }
 
 export async function skambaEliminarEstado(
-  token: string,
+  _token: string,
   est_ide: number,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEliminarEstado/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ est_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al eliminar estado');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaEliminarEstado/', toForm({ est_ide }));
+  return response.data;
 }
 
 export async function skambaConseguirEstados(
-  token: string,
+  _token: string,
 ): Promise<{ success: boolean; data: Estado[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaConseguirEstados/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({}),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al obtener estados');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaConseguirEstados/', toForm({}));
+  return response.data;
 }
 
 export async function skambaConseguirEstadosProyecto(
-  token: string,
+  _token: string,
   pro_ide: number,
 ): Promise<EstadoProyecto[]> {
-  const response = await fetch(
-    `${API_BASE_URL}skambaConseguirEstadosProyecto/`,
-    {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: toForm({ pro_ide }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error('Error al obtener estados del proyecto');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaConseguirEstadosProyecto/', toForm({ pro_ide }));
+  return response.data;
 }
 
 export async function skambaAgregarEstadoProyecto(
-  token: string,
+  _token: string,
   pro_ide: number,
   est_ide: number,
 ): Promise<{ success: boolean; message: string; p_e_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaAgregarEstadoProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ pro_ide, est_ide }),
-  });
+  const response = await apiClient.post('skambaAgregarEstadoProyecto/', toForm({ pro_ide, est_ide }));
+  return response.data;
+}
 
-  if (!response.ok) {
-    throw new Error('Error al agregar estado al proyecto');
+export async function skambaEliminarEstadosProyecto(
+  _token: string,
+  pro_ide: number,
+  est_ides?: number[],
+): Promise<{ success: boolean; message: string }> {
+  const form = toForm({ pro_ide });
+  if (est_ides && est_ides.length > 0) {
+    for (const id of est_ides) {
+      form.append('est_ides[]', String(id));
+    }
   }
 
-  return response.json();
+  const response = await apiClient.post('skambaEliminarEstadosProyecto/', form);
+  return response.data;
 }
 
 export async function skambaQuitarEstadoProyecto(
-  token: string,
+  _token: string,
   p_e_ide: number,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaQuitarEstadoProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ p_e_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al quitar estado del proyecto');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaQuitarEstadoProyecto/', toForm({ p_e_ide }));
+  return response.data;
 }

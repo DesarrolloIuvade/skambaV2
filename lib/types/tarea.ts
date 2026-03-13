@@ -13,6 +13,8 @@ export interface Tarea {
   tar_pad: string | null;
   com_cnt?: number;
   arc_cnt?: number;
+  designado_nombre?: string | null;
+  creador_nombre?: string | null;
 }
 
 export interface EstadoProyecto {
@@ -42,6 +44,7 @@ export interface CrearTareaParams {
   tar_est?: number;
   p_t_ide?: number;
   tar_pad?: number;
+  token?: string;
 }
 
 export interface EditarTareaParams {
@@ -61,6 +64,7 @@ export interface Comentario {
   t_c_com: string;
   t_c_gen: string;
   usu_ide: number;
+  usu_cre?: string;
 }
 
 export interface Archivo {

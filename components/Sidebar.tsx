@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useDashboard } from '../context/DashboardContext';
 import { ChevronIcon, FolderIcon, ListIcon, PlusIcon, CheckIcon } from './Icons';
+import { Pencil, Trash2 } from 'lucide-react';
 import {
     Folder, Lista, Space, Grupo, Plantilla,
     skambaConseguirGruposUsuario, skambaMostrarPlantillas,
@@ -12,6 +13,8 @@ import {
 } from '../lib/api';
 import CreateModal from './CreateModal';
 import { AddMemberModal } from './AddMemberModal';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthStore } from '../context/useAuthStore';
 
 export function Sidebar() {
     const pathname = usePathname();
@@ -55,14 +58,14 @@ export function Sidebar() {
     const [createModalConfig, setCreateModalConfig] = useState<{ parentId?: string; type: 'space' | 'folder' | 'list' | 'workspace' } | null>(null);
     const [isAddMemberModalOpen, setAddMemberModalOpen] = useState(false);
 
-    async function handleCreateItem(name: string) {
+    async function handleCreateItem(name: string, estIdes?: number[]) {
         if (!name.trim() || !createModalConfig) return;
 
         let success: boolean;
         if (createModalConfig.type === 'workspace') {
             success = await createWorkspace(name.trim());
         } else {
-            success = await createItem(createModalConfig.parentId!, createModalConfig.type, name.trim());
+            success = await createItem(createModalConfig.parentId!, createModalConfig.type, name.trim(), estIdes);
         }
 
         if (success) {
@@ -198,7 +201,7 @@ export function Sidebar() {
                         </button>
 
                         {/* Spaces */}
-                        {activeWorkspace.spaces && activeWorkspace.spaces.length > 0 ? (
+                        {activeWorkspace.spaces.length > 0 ? (
                             activeWorkspace.spaces.map((space) => (
                                 <div key={space.pro_ide}>
                                     <SpaceItem
@@ -303,6 +306,81 @@ export function Sidebar() {
     );
 }
 
+// Sub-component for individual list items
+function ListItem({
+    lista,
+    selectedView,
+    onSelectList,
+}: {
+    lista: Lista;
+    selectedView: import('../context/DashboardContext').SelectedView;
+    onSelectList: (l: Lista) => void;
+}) {
+    const { renameItem, deleteItem } = useDashboard();
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+    const isSelected = selectedView?.type === 'list' && selectedView.lista.pro_ide === lista.pro_ide;
+
+    async function handleRename() {
+        if (!editValue.trim() || editValue.trim() === lista.pro_nom) { setIsEditing(false); return; }
+        await renameItem(lista.pro_ide, editValue.trim());
+        setIsEditing(false);
+    }
+
+    async function handleDelete(e: React.MouseEvent) {
+        e.stopPropagation();
+        if (window.confirm(`¿Eliminar lista "${lista.pro_nom}" y todas sus tareas?`)) {
+            await deleteItem(lista.pro_ide);
+        }
+    }
+
+    return (
+        <div className={`group flex items-center rounded-md transition-colors ${isSelected ? 'bg-indigo-50 dark:bg-indigo-900/30' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+            {isEditing ? (
+                <div className="flex flex-1 items-center gap-2 px-2 py-1.5">
+                    <ListIcon />
+                    <input
+                        autoFocus
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setIsEditing(false); }}
+                        onBlur={handleRename}
+                        className="flex-1 min-w-0 text-sm bg-transparent border-b border-indigo-400 outline-none text-zinc-700 dark:text-zinc-300"
+                        onClick={e => e.stopPropagation()}
+                    />
+                </div>
+            ) : (
+                <button
+                    onClick={() => onSelectList(lista)}
+                    className={`flex flex-1 items-center gap-2 px-2 py-1.5 text-sm min-w-0 text-left transition-colors ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-600 dark:text-zinc-400'}`}
+                >
+                    <ListIcon />
+                    <span className="truncate flex-1">{lista.pro_nom}</span>
+                    <span className="ml-auto text-xs text-zinc-400 group-hover:hidden">{lista.tareas.length}</span>
+                </button>
+            )}
+            {!isEditing && (
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 pr-1 shrink-0">
+                    <button
+                        onClick={e => { e.stopPropagation(); setEditValue(lista.pro_nom); setIsEditing(true); }}
+                        title="Renombrar"
+                        className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                        <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                        onClick={handleDelete}
+                        title="Eliminar"
+                        className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-zinc-400 hover:text-red-500 transition-colors"
+                    >
+                        <Trash2 className="w-3 h-3" />
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Sub-component for Folder rendering
 function FolderItem({
     folder,
@@ -321,46 +399,84 @@ function FolderItem({
     onSelectList: (l: Lista) => void;
     onStartCreating: (parentId: string, type: 'folder' | 'list') => void;
 }) {
+    const { renameItem, deleteItem } = useDashboard();
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
     const isFolderSelected = selectedView?.type === 'folder' && selectedView.folder.pro_ide === folder.pro_ide;
-    const selectedListId = selectedView?.type === 'list' ? selectedView.lista.pro_ide : undefined;
+
+    async function handleRename() {
+        if (!editValue.trim() || editValue.trim() === folder.pro_nom) { setIsEditing(false); return; }
+        await renameItem(folder.pro_ide, editValue.trim());
+        setIsEditing(false);
+    }
+
+    async function handleDelete(e: React.MouseEvent) {
+        e.stopPropagation();
+        if (window.confirm(`¿Eliminar carpeta "${folder.pro_nom}" y todo su contenido?`)) {
+            await deleteItem(folder.pro_ide);
+        }
+    }
 
     return (
         <div className="mb-0.5">
-            <div className="flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 pr-1">
+            <div className="group flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 pr-1">
                 <button
                     onClick={onToggle}
                     className="p-1.5 text-zinc-400 hover:text-zinc-600 shrink-0"
                 >
                     <ChevronIcon open={isOpen} />
                 </button>
-                <button
-                    onClick={() => onSelectFolder(folder)}
-                    className={`flex flex-1 items-center gap-2 min-w-0 text-left py-1.5 pr-1 text-sm font-medium transition-colors ${isFolderSelected
-                        ? 'text-indigo-700 dark:text-indigo-300'
-                        : 'text-zinc-700 dark:text-zinc-300'
-                        }`}
-                >
-                    <FolderIcon />
-                    <span className="truncate flex-1">{folder.pro_nom}</span>
-                </button>
+                {isEditing ? (
+                    <div className="flex flex-1 items-center gap-2 py-1.5 pr-1 min-w-0">
+                        <FolderIcon />
+                        <input
+                            autoFocus
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setIsEditing(false); }}
+                            onBlur={handleRename}
+                            className="flex-1 min-w-0 text-sm font-medium bg-transparent border-b border-indigo-400 outline-none text-zinc-700 dark:text-zinc-300"
+                            onClick={e => e.stopPropagation()}
+                        />
+                    </div>
+                ) : (
+                    <button
+                        onClick={() => onSelectFolder(folder)}
+                        className={`flex flex-1 items-center gap-2 min-w-0 text-left py-1.5 pr-1 text-sm font-medium transition-colors ${isFolderSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-700 dark:text-zinc-300'}`}
+                    >
+                        <FolderIcon />
+                        <span className="truncate flex-1">{folder.pro_nom}</span>
+                    </button>
+                )}
+                {!isEditing && (
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
+                        <button
+                            onClick={e => { e.stopPropagation(); setEditValue(folder.pro_nom); setIsEditing(true); }}
+                            title="Renombrar"
+                            className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 transition-colors"
+                        >
+                            <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                            onClick={handleDelete}
+                            title="Eliminar"
+                            className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-zinc-400 hover:text-red-500 transition-colors"
+                        >
+                            <Trash2 className="w-3 h-3" />
+                        </button>
+                    </div>
+                )}
             </div>
 
             {isOpen && (
                 <div className="ml-4 border-l border-zinc-200 dark:border-zinc-800 pl-2 mt-0.5 space-y-0.5">
                     {folder.listas.map(lista => (
-                        <div key={lista.pro_ide}>
-                            <button
-                                onClick={() => onSelectList(lista)}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${selectedListId === lista.pro_ide
-                                    ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
-                                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                                    }`}
-                            >
-                                <ListIcon />
-                                <span className="truncate">{lista.pro_nom}</span>
-                                <span className="ml-auto text-xs text-zinc-400">{lista.tareas.length}</span>
-                            </button>
-                        </div>
+                        <ListItem
+                            key={lista.pro_ide}
+                            lista={lista}
+                            selectedView={selectedView}
+                            onSelectList={onSelectList}
+                        />
                     ))}
                     <button
                         onClick={() => onStartCreating(folder.pro_ide, 'list')}
@@ -398,8 +514,25 @@ function SpaceItem({
     toggleFolder: (id: string) => void;
     onStartCreating: (parentId: string, type: 'folder' | 'list') => void;
 }) {
+    const { renameItem, deleteItem } = useDashboard();
     const isSpaceSelected = selectedView?.type === 'space' && selectedView.space.pro_ide === space.pro_ide;
     const [showPicker, setShowPicker] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+
+    async function handleRename() {
+        if (!editValue.trim() || editValue.trim() === space.pro_nom) { setIsEditing(false); return; }
+        await renameItem(space.pro_ide, editValue.trim());
+        setIsEditing(false);
+    }
+
+    async function handleDelete(e: React.MouseEvent) {
+        e.stopPropagation();
+        if (window.confirm(`¿Eliminar space "${space.pro_nom}" y todo su contenido?`)) {
+            await deleteItem(space.pro_ide);
+        }
+    }
+
     return (
         <div className="mb-1">
             <div className="group flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 pr-1">
@@ -409,16 +542,46 @@ function SpaceItem({
                 >
                     <ChevronIcon open={isOpen} />
                 </button>
-                <button
-                    onClick={onSelectSpace}
-                    className={`flex flex-1 items-center gap-2 min-w-0 text-left py-1.5 pr-1 text-sm font-semibold transition-colors ${isSpaceSelected
-                        ? 'text-indigo-700 dark:text-indigo-300'
-                        : 'text-zinc-800 dark:text-zinc-200'
-                        }`}
-                >
-                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                    <span className="truncate flex-1">{space.pro_nom}</span>
-                </button>
+                {isEditing ? (
+                    <div className="flex flex-1 items-center gap-2 py-1.5 pr-1 min-w-0">
+                        <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+                        <input
+                            autoFocus
+                            value={editValue}
+                            onChange={e => setEditValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setIsEditing(false); }}
+                            onBlur={handleRename}
+                            className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-b border-indigo-400 outline-none text-zinc-800 dark:text-zinc-200"
+                            onClick={e => e.stopPropagation()}
+                        />
+                    </div>
+                ) : (
+                    <button
+                        onClick={onSelectSpace}
+                        className={`flex flex-1 items-center gap-2 min-w-0 text-left py-1.5 pr-1 text-sm font-semibold transition-colors ${isSpaceSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-800 dark:text-zinc-200'}`}
+                    >
+                        <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                        <span className="truncate flex-1">{space.pro_nom}</span>
+                    </button>
+                )}
+                {!isEditing && (
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
+                        <button
+                            onClick={e => { e.stopPropagation(); setEditValue(space.pro_nom); setIsEditing(true); }}
+                            title="Renombrar"
+                            className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 transition-colors"
+                        >
+                            <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                            onClick={handleDelete}
+                            title="Eliminar"
+                            className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-zinc-400 hover:text-red-500 transition-colors"
+                        >
+                            <Trash2 className="w-3 h-3" />
+                        </button>
+                    </div>
+                )}
             </div>
 
             {isOpen && (
@@ -436,20 +599,12 @@ function SpaceItem({
                         />
                     ))}
                     {(space.contenido?.listas ?? []).map((lista) => (
-                        <div key={lista.pro_ide}>
-                            <button
-                                onClick={() => onSelectList(lista)}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
-                                    selectedView?.type === 'list' && selectedView.lista.pro_ide === lista.pro_ide
-                                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
-                                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                                }`}
-                            >
-                                <ListIcon />
-                                <span className="truncate">{lista.pro_nom}</span>
-                                <span className="ml-auto text-xs text-zinc-400">{lista.tareas.length}</span>
-                            </button>
-                        </div>
+                        <ListItem
+                            key={lista.pro_ide}
+                            lista={lista}
+                            selectedView={selectedView}
+                            onSelectList={onSelectList}
+                        />
                     ))}
                     {showPicker ? (
                         <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
@@ -501,8 +656,11 @@ function GruposSection() {
     const [newGrupoName, setNewGrupoName] = useState('');
     const [creatingGrupo, setCreatingGrupo] = useState(false);
 
-    function getToken() { return localStorage.getItem('sk_token') ?? ''; }
-    function getUsuIde() { return Number(localStorage.getItem('sk_usu_ide') ?? '0'); }
+    const { logout } = useAuth();
+    const { user, token } = useAuthStore();
+
+    function getToken() { return token ?? ''; }
+    function getUsuIde() { return user?.usu_ide ?? 0; }
 
     async function loadGrupos() {
         setLoading(true);
@@ -641,8 +799,9 @@ function PlantillasSection() {
     const [newPlantillaName, setNewPlantillaName] = useState('');
     const [creatingPlantilla, setCreatingPlantilla] = useState(false);
 
-    function getToken() { return localStorage.getItem('sk_token') ?? ''; }
-    function getUsuIde() { return Number(localStorage.getItem('sk_usu_ide') ?? '0'); }
+    const { token, user } = useAuthStore();
+    function getToken() { return token ?? ''; }
+    function getUsuIde() { return user?.usu_ide ?? 0; }
 
     async function loadPlantillas() {
         setLoading(true);

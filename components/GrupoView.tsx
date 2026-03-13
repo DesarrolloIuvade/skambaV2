@@ -5,7 +5,7 @@ import { useDashboard } from '../context/DashboardContext';
 import {
     skambaConseguirGruposUsuario,
     skambaConseguirProyectosGrupo,
-    skambaConseguirProyectosUsuario,
+    skambaConseguirProyectosGrupoUsuario,
     skambaConseguirMiembros,
     skambaAgregarGrupoProyecto,
     skambaEliminarGrupoProyecto,
@@ -13,11 +13,10 @@ import {
     skambaCrearGrupo,
     skambaAgregarMiembro,
     skambaEliminarMiembro,
-    skambaUsuarios,
 } from '../lib/api';
+import { useAuthStore } from '../context/useAuthStore';
 import type { Grupo, Miembro, ProyectoGrupo } from '../lib/types/grupo';
-import type { Usuario } from '../lib/types/usuario';
-import type { Workspace } from '../lib/types/proyecto';
+import type { Workspace, Space, Folder, Lista } from '../lib/types/proyecto';
 
 export function GrupoView({ grupo }: { grupo?: Grupo }) {
     const { workspaces, loadProyectos } = useDashboard();
@@ -35,9 +34,6 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     const [miembros, setMiembros] = useState<Miembro[]>([]);
     const [loadingMiembros, setLoadingMiembros] = useState(false);
 
-    // Usuarios disponibles para agregar como miembros
-    const [allUsuarios, setAllUsuarios] = useState<Usuario[]>([]);
-
     // Crear grupo
     const [showCreateGrupo, setShowCreateGrupo] = useState(false);
     const [newGrupoName, setNewGrupoName] = useState('');
@@ -45,7 +41,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
 
     // Agregar miembro
     const [showAddMember, setShowAddMember] = useState(false);
-    const [selectedUsuario, setSelectedUsuario] = useState<number | ''>('');
+    const [emailMiembro, setEmailMiembro] = useState('');
     const [addingMember, setAddingMember] = useState(false);
 
     // Agregar proyecto
@@ -68,14 +64,14 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     // Acceso de miembros a proyectos: Map<usu_ide, Set<pro_ide>>
     const [memberAccess, setMemberAccess] = useState<Map<number, Set<string>>>(new Map());
 
+    const { user: storeUser } = useAuthStore();
+    const usuIde = storeUser?.usu_ide ?? 0;
+
     const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-    function getToken() { return localStorage.getItem('sk_token') ?? ''; }
-    function getUsuIde() { return Number(localStorage.getItem('sk_usu_ide') ?? '0'); }
 
     useEffect(() => {
         loadGrupos();
-        loadAllUsuarios();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -90,7 +86,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     async function loadGrupos() {
         setLoadingGrupos(true);
         try {
-            const res = await skambaConseguirGruposUsuario(getToken(), getUsuIde());
+            const res = await skambaConseguirGruposUsuario('', usuIde);
             if (res.success && res.data) {
                 setAllGrupos(res.data);
                 if (res.data.length > 0 && !selectedGrupo) {
@@ -103,14 +99,55 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setLoadingGrupos(false);
     }
 
-    async function loadAllUsuarios() {
-        try {
-            const res = await skambaUsuarios(getToken());
-            if (res.success && res.data) {
-                setAllUsuarios(res.data);
+    function collectProIds(node: unknown): Set<string> {
+        const ids = new Set<string>();
+        if (!node || typeof node !== 'object') return ids;
+        if (Array.isArray(node)) {
+            for (const item of node) for (const id of collectProIds(item)) ids.add(id);
+            return ids;
+        }
+        const obj = node as Record<string, unknown>;
+        if (obj.pro_ide != null) ids.add(String(obj.pro_ide));
+        for (const val of Object.values(obj)) {
+            if (val && typeof val === 'object') for (const id of collectProIds(val)) ids.add(id);
+        }
+        return ids;
+    }
+
+    interface FlatItem {
+        pro_ide: string;
+        pro_nom: string;
+        pro_tip: string;
+        path: string;
+        depth: number;
+    }
+
+    function flattenAllItems(wss: Workspace[]): FlatItem[] {
+        const items: FlatItem[] = [];
+        for (const ws of wss) {
+            items.push({ pro_ide: ws.pro_ide, pro_nom: ws.pro_nom, pro_tip: ws.pro_tip ?? 'workspace', path: ws.pro_nom, depth: 0 });
+            for (const space of (ws.spaces ?? [])) {
+                items.push({ pro_ide: space.pro_ide, pro_nom: space.pro_nom, pro_tip: space.pro_tip ?? 'space', path: `${ws.pro_nom} › ${space.pro_nom}`, depth: 1 });
+                for (const folder of (space.contenido?.folders ?? [])) {
+                    items.push({ pro_ide: folder.pro_ide, pro_nom: folder.pro_nom, pro_tip: folder.pro_tip ?? 'folder', path: `${ws.pro_nom} › ${space.pro_nom} › ${folder.pro_nom}`, depth: 2 });
+                    for (const lista of (folder.listas ?? [])) {
+                        items.push({ pro_ide: lista.pro_ide, pro_nom: lista.pro_nom, pro_tip: lista.pro_tip ?? 'list', path: `${ws.pro_nom} › ${space.pro_nom} › ${folder.pro_nom} › ${lista.pro_nom}`, depth: 3 });
+                    }
+                }
+                for (const lista of (space.contenido?.listas ?? [])) {
+                    items.push({ pro_ide: lista.pro_ide, pro_nom: lista.pro_nom, pro_tip: lista.pro_tip ?? 'list', path: `${ws.pro_nom} › ${space.pro_nom} › ${lista.pro_nom}`, depth: 2 });
+                }
             }
-        } catch {
-            // silently ignore
+        }
+        return items;
+    }
+
+    function tipStyle(tip: string) {
+        switch (tip) {
+            case 'space': return { label: 'Space', bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' };
+            case 'folder': return { label: 'Folder', bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-600 dark:text-amber-400' };
+            case 'list': return { label: 'Lista', bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-600 dark:text-purple-400' };
+            default: return { label: 'Workspace', bg: 'bg-indigo-100 dark:bg-indigo-900/30', text: 'text-indigo-600 dark:text-indigo-400' };
         }
     }
 
@@ -118,7 +155,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         if (!selectedGrupo) return;
         setLoadingProyectos(true);
         try {
-            const res = await skambaConseguirProyectosGrupo(getToken(), getUsuIde(), selectedGrupo.gru_ide);
+            const res = await skambaConseguirProyectosGrupo('', usuIde, selectedGrupo.gru_ide);
             if (res.success && res.data) {
                 setProyectos(res.data);
             }
@@ -132,16 +169,16 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         if (!selectedGrupo) return;
         setLoadingMiembros(true);
         try {
-            const res = await skambaConseguirMiembros(getToken(), selectedGrupo.gru_ide);
+            const res = await skambaConseguirMiembros('', selectedGrupo.gru_ide);
             if (res.success && res.data) {
                 setMiembros(res.data);
                 // Cargar acceso de cada miembro a proyectos
                 const entries = await Promise.all(
                     res.data.map(async (m): Promise<[number, Set<string>]> => {
                         try {
-                            const r = await skambaConseguirProyectosUsuario(getToken(), m.usu_ide);
+                            const r = await skambaConseguirProyectosGrupoUsuario('', selectedGrupo.gru_ide, m.usu_ide);
                             if (r.success && r.data) {
-                                return [m.usu_ide, new Set(r.data.map((p: Workspace) => String(p.pro_ide)))];
+                                return [m.usu_ide, collectProIds(r.data)];
                             }
                         } catch {
                             // silently ignore
@@ -163,7 +200,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setCreatingGrupo(true);
         setMessage(null);
         try {
-            const res = await skambaCrearGrupo(getToken(), newGrupoName.trim(), getUsuIde());
+            const res = await skambaCrearGrupo('', newGrupoName.trim(), usuIde);
             if (res.success && res.gru_ide) {
                 setMessage({ text: `Grupo "${newGrupoName}" creado exitosamente.`, type: 'success' });
                 setNewGrupoName('');
@@ -180,20 +217,21 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
 
     async function handleAddMember(e: React.FormEvent) {
         e.preventDefault();
-        if (!selectedGrupo || !selectedUsuario) return;
+        if (!selectedGrupo || !emailMiembro.trim()) return;
         setAddingMember(true);
         setMessage(null);
         try {
-            const res = await skambaAgregarMiembro(getToken(), selectedGrupo.gru_ide, Number(selectedUsuario));
+            const res = await skambaAgregarMiembro('', selectedGrupo.gru_ide, emailMiembro.trim());
             if (res.success) {
-                setSelectedUsuario('');
+                const nuevoUsuIde = res.usu_ide;
+                const nuevoUsuNom = res.usu_nom;
+                setEmailMiembro('');
                 setShowAddMember(false);
                 await loadMiembros();
                 // Abrir modal para asignar workspaces al nuevo miembro
                 if (proyectos.length > 0) {
-                    const usu = allUsuarios.find(u => u.usu_ide === Number(selectedUsuario));
                     setAssignSelected(new Set(proyectos.map(p => p.pro_ide)));
-                    setAssignModal({ type: 'projectsToMember', usu_ide: Number(selectedUsuario), usu_nom: usu?.usu_nom ?? '' });
+                    setAssignModal({ type: 'projectsToMember', usu_ide: nuevoUsuIde, usu_nom: nuevoUsuNom });
                 } else {
                     setMessage({ text: 'Miembro agregado al grupo.', type: 'success' });
                 }
@@ -206,11 +244,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setAddingMember(false);
     }
 
-    async function handleRemoveMember(usuIde: number) {
+    async function handleRemoveMember(usuIdeToRemove: number) {
         if (!selectedGrupo) return;
         setMessage(null);
         try {
-            const res = await skambaEliminarMiembro(getToken(), selectedGrupo.gru_ide, usuIde);
+            const res = await skambaEliminarMiembro('', selectedGrupo.gru_ide, usuIdeToRemove);
             if (res.success) {
                 setMessage({ text: 'Miembro eliminado del grupo.', type: 'success' });
                 await loadMiembros();
@@ -229,13 +267,13 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setMessage(null);
         try {
             const proIde = Number(selectedProyecto);
-            const res = await skambaAgregarGrupoProyecto(getToken(), selectedGrupo.gru_ide, proIde);
+            const res = await skambaAgregarGrupoProyecto('', selectedGrupo.gru_ide, proIde);
             if (res.success) {
-                const wsName = workspaces.find(w => String(w.pro_ide) === String(selectedProyecto))?.pro_nom ?? '';
-                const currentUserId = getUsuIde();
+                const wsName = flattenAllItems(workspaces).find(item => String(item.pro_ide) === String(selectedProyecto))?.pro_nom ?? '';
+                const currentUserId = usuIde;
 
                 // El usuario logeado se asigna automáticamente
-                await skambaAgregarUsuarioProyectoMiembro(getToken(), selectedGrupo.gru_ide, currentUserId, proIde).catch(() => null);
+                await skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, currentUserId, proIde).catch(() => null);
 
                 setSelectedProyecto('');
                 setShowAddProyecto(false);
@@ -248,7 +286,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                     setAssignSelected(new Set(otherMembers.map(m => m.usu_ide)));
                     setAssignModal({ type: 'membersToProject', pro_ide: proIde, pro_nom: wsName });
                 } else {
-                    setMessage({ text: 'Workspace vinculado al grupo.', type: 'success' });
+                    setMessage({ text: 'Elemento vinculado al grupo.', type: 'success' });
                 }
             } else {
                 setMessage({ text: res.message || 'Error al agregar proyecto', type: 'error' });
@@ -265,14 +303,14 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         try {
             if (assignModal.type === 'membersToProject') {
                 await Promise.all(
-                    [...assignSelected].map(usuIde =>
-                        skambaAgregarUsuarioProyectoMiembro(getToken(), selectedGrupo.gru_ide, usuIde, assignModal.pro_ide).catch(() => null)
+                    [...assignSelected].map(uIde =>
+                        skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, uIde, assignModal.pro_ide).catch(() => null)
                     )
                 );
             } else {
                 await Promise.all(
-                    [...assignSelected].map(proIde =>
-                        skambaAgregarUsuarioProyectoMiembro(getToken(), selectedGrupo.gru_ide, assignModal.usu_ide, proIde).catch(() => null)
+                    [...assignSelected].map(pIde =>
+                        skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, assignModal.usu_ide, pIde).catch(() => null)
                     )
                 );
             }
@@ -289,7 +327,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     async function handleRemoveProyecto(gppIde: number) {
         setMessage(null);
         try {
-            const res = await skambaEliminarGrupoProyecto(getToken(), gppIde);
+            const res = await skambaEliminarGrupoProyecto('', gppIde);
             if (res.success) {
                 setMessage({ text: 'Proyecto eliminado del grupo.', type: 'success' });
                 await loadProyectosGrupo();
@@ -301,13 +339,13 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         }
     }
 
-    async function handleAssignMemberToProject(usuIde: number, proIde: number) {
+    async function handleAssignMemberToProject(uIde: number, proIde: number) {
         if (!selectedGrupo) return;
-        const key = `${usuIde}-${proIde}`;
+        const key = `${uIde}-${proIde}`;
         setAssigningKey(key);
         setMessage(null);
         try {
-            const res = await skambaAgregarUsuarioProyectoMiembro(getToken(), selectedGrupo.gru_ide, usuIde, proIde);
+            const res = await skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, uIde, proIde);
             if (res.success) {
                 setMemberAccess(prev => {
                     const next = new Map(prev);
@@ -327,9 +365,9 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     }
 
     // Filtros
-    const availableUsuarios = allUsuarios.filter(u => !miembros.find(m => m.usu_ide === u.usu_ide));
     const linkedProyectoIds = new Set(proyectos.map(p => String(p.pro_ide)));
-    const availableProyectos = workspaces.filter(w => !linkedProyectoIds.has(String(w.pro_ide)));
+    const allFlatItems = flattenAllItems(workspaces);
+    const availableItems = allFlatItems.filter(item => !linkedProyectoIds.has(String(item.pro_ide)));
 
     return (
         <div className="flex flex-col h-full overflow-hidden">
@@ -486,27 +524,25 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                     <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
                                         Agregar usuario al grupo
                                     </p>
-                                    <select
-                                        value={selectedUsuario}
-                                        onChange={e => setSelectedUsuario(Number(e.target.value))}
+                                    <input
+                                        autoFocus
+                                        type="email"
+                                        placeholder="Email del usuario..."
+                                        value={emailMiembro}
+                                        onChange={e => setEmailMiembro(e.target.value)}
                                         className="w-full px-2.5 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                    >
-                                        <option value="">Seleccionar usuario...</option>
-                                        {availableUsuarios.map(u => (
-                                            <option key={u.usu_ide} value={u.usu_ide}>{u.usu_nom}</option>
-                                        ))}
-                                    </select>
+                                    />
                                     <div className="flex gap-2">
                                         <button
                                             type="submit"
-                                            disabled={addingMember || !selectedUsuario}
+                                            disabled={addingMember || !emailMiembro.trim()}
                                             className="flex-1 px-3 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                                         >
                                             {addingMember ? 'Agregando...' : 'Agregar al grupo'}
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => { setShowAddMember(false); setSelectedUsuario(''); }}
+                                            onClick={() => { setShowAddMember(false); setEmailMiembro(''); }}
                                             className="px-2.5 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                                         >
                                             Cancelar
@@ -527,11 +563,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                         </div>
                     </div>
 
-                    {/* ── Right panel: Workspaces del grupo ── */}
+                    {/* ── Right panel: Elementos del grupo ── */}
                     <div className="flex-1 flex flex-col overflow-hidden">
                         <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
                             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                                Workspaces ({loadingProyectos ? '…' : proyectos.length})
+                                Elementos vinculados ({loadingProyectos ? '…' : proyectos.length})
                             </p>
                             <button
                                 onClick={() => setShowAddProyecto(v => !v)}
@@ -540,7 +576,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                                 </svg>
-                                Vincular workspace
+                                Vincular elemento
                             </button>
                         </div>
 
@@ -549,7 +585,10 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                             {showAddProyecto && (
                                 <form onSubmit={handleAddProyecto} className="p-4 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
                                     <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">
-                                        Vincular workspace al grupo
+                                        Vincular elemento al grupo
+                                    </p>
+                                    <p className="text-xs text-zinc-400 mb-3">
+                                        Selecciona un workspace, space, folder o lista para vincular.
                                     </p>
                                     <div className="flex gap-2">
                                         <select
@@ -557,9 +596,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                             onChange={e => setSelectedProyecto(e.target.value)}
                                             className="flex-1 px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                         >
-                                            <option value="">Seleccionar workspace...</option>
-                                            {availableProyectos.map(p => (
-                                                <option key={p.pro_ide} value={p.pro_ide}>{p.pro_nom}</option>
+                                            <option value="">Seleccionar elemento...</option>
+                                            {availableItems.map(item => (
+                                                <option key={item.pro_ide} value={item.pro_ide}>
+                                                    {'\u00A0\u00A0'.repeat(item.depth)}{tipStyle(item.pro_tip).label}: {item.pro_nom}
+                                                </option>
                                             ))}
                                         </select>
                                         <button
@@ -581,11 +622,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                             )}
 
                             {loadingProyectos ? (
-                                <p className="text-sm text-zinc-400 text-center py-8">Cargando workspaces...</p>
+                                <p className="text-sm text-zinc-400 text-center py-8">Cargando elementos...</p>
                             ) : proyectos.length === 0 ? (
                                 <div className="text-center py-16 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
-                                    <p className="text-sm text-zinc-500">No hay workspaces vinculados a este grupo</p>
-                                    <p className="text-xs text-zinc-400 mt-1">Usa "Vincular workspace" para agregar uno</p>
+                                    <p className="text-sm text-zinc-500">No hay elementos vinculados a este grupo</p>
+                                    <p className="text-xs text-zinc-400 mt-1">Usa "Vincular elemento" para agregar workspaces, spaces, folders o listas</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -603,12 +644,14 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                             <div key={p.gpp_ide} className="p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-3 min-w-0">
-                                                        <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-sm font-bold shrink-0">
+                                                        <div className={`w-8 h-8 rounded-lg ${tipStyle(p.pro_tip).bg} flex items-center justify-center ${tipStyle(p.pro_tip).text} text-sm font-bold shrink-0`}>
                                                             {p.pro_nom.charAt(0).toUpperCase()}
                                                         </div>
                                                         <div className="min-w-0">
                                                             <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.pro_nom}</p>
-                                                            <p className="text-xs text-zinc-400 capitalize">{p.pro_tip}</p>
+                                                            <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded ${tipStyle(p.pro_tip).bg} ${tipStyle(p.pro_tip).text}`}>
+                                                                {tipStyle(p.pro_tip).label}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                     <button
@@ -622,7 +665,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                                 {/* Acceso al workspace */}
                                                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3">
                                                     <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-                                                        Acceso al workspace
+                                                        Acceso
                                                     </p>
                                                     {miembros.length === 0 ? (
                                                         <p className="text-xs text-zinc-400 italic">
@@ -648,7 +691,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                                                         onClick={() => handleAssignMemberToProject(m.usu_ide, p.pro_ide)}
                                                                         disabled={assigningKey === key}
                                                                         className="px-2 py-0.5 text-[11px] font-medium border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 rounded-full hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
-                                                                        title={`Asignar a ${m.usu_nom} al workspace "${p.pro_nom}"`}
+                                                                        title={`Asignar a ${m.usu_nom} a "${p.pro_nom}"`}
                                                                     >
                                                                         {assigningKey === key ? '...' : `+ ${m.usu_nom}`}
                                                                     </button>
@@ -677,7 +720,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                             <p className="text-sm font-semibold text-zinc-900 dark:text-white">
                                 {assignModal.type === 'membersToProject'
                                     ? `Asignar miembros a "${assignModal.pro_nom}"`
-                                    : `Asignar workspaces a ${assignModal.usu_nom}`}
+                                    : `Asignar elementos a ${assignModal.usu_nom}`}
                             </p>
                             <p className="text-xs text-zinc-500 mt-0.5">
                                 Selecciona a quién dar acceso
@@ -687,7 +730,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                         {/* Lista con checkboxes */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-2 max-h-72">
                             {assignModal.type === 'membersToProject' ? (
-                                miembros.filter(m => m.usu_ide !== getUsuIde()).map(m => (
+                                miembros.filter(m => m.usu_ide !== usuIde).map(m => (
                                     <label key={m.usu_ide} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer">
                                         <input
                                             type="checkbox"
@@ -721,10 +764,13 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                             })}
                                             className="w-4 h-4 accent-indigo-600 rounded"
                                         />
-                                        <div className="w-7 h-7 rounded-lg bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-xs font-bold shrink-0">
+                                        <div className={`w-7 h-7 rounded-lg ${tipStyle(p.pro_tip).bg} flex items-center justify-center ${tipStyle(p.pro_tip).text} text-xs font-bold shrink-0`}>
                                             {p.pro_nom.charAt(0).toUpperCase()}
                                         </div>
-                                        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.pro_nom}</p>
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.pro_nom}</p>
+                                            <p className={`text-[10px] font-semibold ${tipStyle(p.pro_tip).text}`}>{tipStyle(p.pro_tip).label}</p>
+                                        </div>
                                     </label>
                                 ))
                             )}

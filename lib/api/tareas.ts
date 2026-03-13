@@ -1,4 +1,5 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
+import { toForm } from './base';
 import type {
   Tarea,
   CrearTareaParams,
@@ -6,73 +7,56 @@ import type {
 } from '../types/tarea';
 
 // ------------------------------
-// Tareas
+// Tareas (Refactored to use apiClient)
 // ------------------------------
 
 export async function skambaCrearTarea(
   token: string,
   params: CrearTareaParams,
 ): Promise<{ success: boolean; message: string; tar_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaCrearTarea/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm(params),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al crear tarea');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaCrearTarea/', toForm({ ...params, token }));
+  return response.data;
 }
 
 export async function skambaEditarTarea(
-  token: string,
+  _token: string,
   params: EditarTareaParams,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEditarTarea/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm(params),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al editar tarea');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaEditarTarea/', toForm(params));
+  return response.data;
 }
 
 export async function skambaVerTareas(
-  token: string,
+  _token: string,
   pro_ide: number,
 ): Promise<{ success: boolean; data: Tarea[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaVerTareas/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ pro_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al listar tareas');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaVerTareas/', toForm({ pro_ide }));
+  return response.data;
 }
 
 export async function skambaVerTarea(
-  token: string,
+  _token: string,
   tar_ide: number,
 ): Promise<Tarea | null> {
-  const response = await fetch(`${API_BASE_URL}skambaVerTarea/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ tar_ide }),
+  const response = await apiClient.post('skambaVerTarea/', toForm({ tar_ide }));
+  return response.data.success ? response.data.data : null;
+}
+
+export interface TareaLog {
+  t_e_ide: string;
+  tar_ide: string;
+  tar_est: string;
+  t_e_tim: string;
+  usu_ide: string;
+  est_ado: string;
+}
+
+export async function skambaLogsTareas(
+  _token: string,
+  tar_ide: number,
+): Promise<{ success: boolean; data: TareaLog[] }> {
+  const response = await apiClient.get('skambaLogsTareas/', {
+    params: { tar_ide }
   });
-
-  if (!response.ok) {
-    throw new Error('Error al obtener tarea');
-  }
-
-  return response.json();
+  return response.data;
 }

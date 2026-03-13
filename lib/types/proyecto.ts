@@ -6,7 +6,7 @@ export interface Lista {
   usu_ide: string;
   pro_pad: string;
   est_ado: string;
-  pro_tip: string;
+  pro_tip: 'list';
   tareas: Tarea[];
   estados: EstadoProyecto[];
 }
@@ -17,7 +17,7 @@ export interface Folder {
   usu_ide: string;
   pro_pad: string;
   est_ado: string;
-  pro_tip: string;
+  pro_tip: 'folder';
   listas: Lista[];
 }
 
@@ -27,7 +27,7 @@ export interface Space {
   usu_ide: string;
   pro_pad: string;
   est_ado: string;
-  pro_tip: string;
+  pro_tip: 'space';
   contenido: {
     folders: Folder[];
     listas: Lista[];
@@ -40,9 +40,8 @@ export interface Workspace {
   usu_ide: string;
   pro_pad: string;
   est_ado: string;
-  pro_tip: string;
-  folders: Folder[];
-  spaces?: Space[];
+  pro_tip: 'workspace';
+  spaces: Space[];
 }
 
 export interface CrearProyecto {

@@ -1,4 +1,6 @@
-export const API_BASE_URL = 'https://sm.plataformasvirtuales.pe/sk_demo/api/';
+// export const API_BASE_URL = 'https://sm.plataformasvirtuales.pe/sk/api/';
+
+export const API_BASE_URL = 'http://localhost/siggo/api/';
 
 function authHeaders(token: string): Record<string, string> {
   return { Authorization: token };

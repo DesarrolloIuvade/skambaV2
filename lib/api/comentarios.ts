@@ -1,12 +1,13 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
+import { toForm } from './base';
 import type { Comentario } from '../types/tarea';
 
-// ------------------------------
-// Comentarios
-// ------------------------------
+/**
+ * Comentarios API refactored to use apiClient.
+ */
 
 export async function skambaHacerComentario(
-  token: string,
+  _token: string,
   tar_ide: number,
   t_c_com: string,
 ): Promise<{
@@ -15,49 +16,22 @@ export async function skambaHacerComentario(
   t_a_ide: number;
   tar_ide: number;
 }> {
-  const response = await fetch(`${API_BASE_URL}skambaHacerComentario/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ tar_ide, t_c_com }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al crear comentario');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaHacerComentario/', toForm({ tar_ide, t_c_com }));
+  return response.data;
 }
 
 export async function skambaTareaComentarios(
-  token: string,
+  _token: string,
   tar_ide: number,
 ): Promise<{ success: boolean; comentarios: Comentario[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaTareaComentarios/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ tar_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al obtener comentarios');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaTareaComentarios/', toForm({ tar_ide }));
+  return response.data;
 }
 
 export async function skambaEliminarComentario(
-  token: string,
+  _token: string,
   t_a_ide: number,
 ): Promise<{ success: boolean; message: string; t_a_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaEliminarComentario/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ t_a_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al eliminar comentario');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaEliminarComentario/', toForm({ t_a_ide }));
+  return response.data;
 }

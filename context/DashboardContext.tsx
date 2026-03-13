@@ -6,12 +6,16 @@ import {
     skambaConseguirProyectos,
     skambaConseguirProyectosUsuario,
     skambaCrearProyecto,
+    skambaEditarProyecto,
+    skambaEliminarProyecto,
     type Workspace,
     type Folder,
     type Lista,
     type Space,
     type Grupo,
 } from '../lib/api';
+import { useAuth } from '../hooks/useAuth';
+import { useAuthStore } from './useAuthStore';
 
 export type SelectedView =
     | { type: 'workspace'; workspace: Workspace }
@@ -52,7 +56,9 @@ interface DashboardContextType {
     openFolders: Set<string>;
     toggleFolder: (id: string) => void;
     createWorkspace: (name: string) => Promise<boolean>;
-    createItem: (parentId: string, type: 'space' | 'folder' | 'list', name: string) => Promise<boolean>;
+    createItem: (parentId: string, type: 'space' | 'folder' | 'list', name: string, estIdes?: number[]) => Promise<boolean>;
+    renameItem: (pro_ide: string, newName: string) => Promise<boolean>;
+    deleteItem: (pro_ide: string) => Promise<boolean>;
     selectGrupo: (grupo: Grupo) => void;
     logout: () => void;
     loadProyectos: () => Promise<void>;
@@ -65,23 +71,21 @@ interface DashboardContextType {
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
 function collectSpaces(ws: Workspace): Space[] {
-    return ws.spaces ?? [];
+    return ws.spaces;
 }
 
 function collectFolders(ws: Workspace): Folder[] {
-    const foldersFromSpaces = collectSpaces(ws).flatMap((s) => s.contenido?.folders ?? []);
-    if (foldersFromSpaces.length > 0) return foldersFromSpaces;
-    return ws.folders ?? [];
+    return ws.spaces.flatMap((s) => s.contenido?.folders ?? []);
 }
 
 function collectListas(ws: Workspace): Lista[] {
-    const listasFromSpaces = collectSpaces(ws).flatMap((s) => s.contenido?.listas ?? []);
+    const listasFromSpaces = ws.spaces.flatMap((s) => s.contenido?.listas ?? []);
     const listasFromFolders = collectFolders(ws).flatMap((f) => f.listas ?? []);
     return [...listasFromSpaces, ...listasFromFolders];
 }
 
 function normalizeWorkspace(raw: Workspace): Workspace {
-    const spaces = (raw as Workspace & { spaces?: Space[] }).spaces ?? [];
+    const spaces = raw.spaces ?? [];
     const normalizedSpaces = spaces.map((space) => ({
         ...space,
         contenido: {
@@ -90,14 +94,9 @@ function normalizeWorkspace(raw: Workspace): Workspace {
         },
     }));
 
-    const directFolders = (raw as Workspace & { folders?: Folder[] }).folders ?? [];
-    const foldersFromSpaces = normalizedSpaces.flatMap((s) => s.contenido.folders ?? []);
-    const mergedFolders = foldersFromSpaces.length > 0 ? foldersFromSpaces : directFolders;
-
     return {
         ...raw,
-        spaces: normalizedSpaces,
-        folders: mergedFolders,
+        spaces: normalizedSpaces || [],
     };
 }
 
@@ -121,6 +120,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const [wsLoading, setWsLoading] = useState(false);
     const [wsError, setWsError] = useState('');
 
+    const { user: storeUser, token } = useAuthStore();
+
     // Persist activeWorkspaceId automatically whenever it changes
     useEffect(() => {
         if (activeWorkspaceId) {
@@ -129,35 +130,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }, [activeWorkspaceId]);
 
     useEffect(() => {
-        const token = localStorage.getItem('sk_token');
         if (!token) {
-            router.replace('/');
+            setLoading(false);
             return;
         }
 
-        const raw = localStorage.getItem('sk_user');
-        if (raw) {
-            try {
-                const u = JSON.parse(raw);
-                setUser({
-                    name: u.usu_nom ?? u.usuario ?? '',
-                    email: u.usu_ema ?? u.usuario ?? '',
-                });
-            } catch {
-                // ignore
-            }
+        if (storeUser) {
+            setUser({
+                name: storeUser.usu_nom ?? storeUser.usuario ?? '',
+                email: storeUser.usu_ema ?? storeUser.usuario ?? '',
+            });
         }
 
         loadProyectosInternal(token).finally(() => setLoading(false));
-    }, [router]);
+    }, [token, storeUser]);
 
-    async function loadProyectosInternal(token: string) {
-        const usu_ide = Number(localStorage.getItem('sk_usu_ide') ?? '0');
+    async function loadProyectosInternal(tk: string) {
+        const usu_ide = storeUser?.usu_ide ?? 0;
+        // Proceed even if usu_ide is missing, as the main call only needs the token
+
         setLoadError('');
         try {
             const [res, groupRes] = await Promise.all([
-                skambaConseguirProyectos(token, usu_ide),
-                skambaConseguirProyectosUsuario(token, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] })),
+                skambaConseguirProyectos(tk),
+                skambaConseguirProyectosUsuario(tk, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] })),
             ]);
 
             let normalizedGroup: Workspace[] = [];
@@ -172,32 +168,29 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                 setWorkspaces(normalized);
             }
 
-            // Set default active workspace if none selected or current is invalid
-            if (normalized.length > 0 || normalizedGroup.length > 0) {
-                setActiveWorkspaceId((prev) => {
-                    const inPersonal = normalized.find((w) => w.pro_ide === prev);
-                    if (inPersonal) return prev;
-                    const inGroup = normalizedGroup.find((w) => w.pro_ide === prev);
-                    if (inGroup) return prev;
-                    // Restore from localStorage (page refresh)
-                    const savedActiveWs = localStorage.getItem('sk_active_workspace');
-                    if (savedActiveWs) {
-                        const inPersonalSaved = normalized.find((w) => String(w.pro_ide) === String(savedActiveWs));
-                        if (inPersonalSaved) return inPersonalSaved.pro_ide;
-                        const inGroupSaved = normalizedGroup.find((w) => String(w.pro_ide) === String(savedActiveWs));
-                        if (inGroupSaved) return inGroupSaved.pro_ide;
-                    }
-                    // Default to first personal, or first group if user has no personal workspaces
-                    return normalized[0]?.pro_ide ?? normalizedGroup[0].pro_ide;
-                });
-            }
-
-            // Sync selectedView and selectedLista with fresh data, or restore from localStorage on F5
             const allWorkspaces = [...normalized, ...normalizedGroup];
             const allSpaces = allWorkspaces.flatMap((w) => collectSpaces(w));
             const allFolders = allWorkspaces.flatMap((w) => collectFolders(w));
             const allListas = allWorkspaces.flatMap((w) => collectListas(w));
 
+            // Set default active workspace if none selected or current is invalid
+            if (allWorkspaces.length > 0) {
+                setActiveWorkspaceId((prev) => {
+                    const inPersonal = normalized.find((w) => w.pro_ide === prev);
+                    if (inPersonal) return prev;
+                    const inGroup = normalizedGroup.find((w) => w.pro_ide === prev);
+                    if (inGroup) return prev;
+
+                    const savedActiveWs = localStorage.getItem('sk_active_workspace');
+                    if (savedActiveWs) {
+                        const inAll = allWorkspaces.find((w) => String(w.pro_ide) === String(savedActiveWs));
+                        if (inAll) return inAll.pro_ide;
+                    }
+                    return allWorkspaces[0].pro_ide;
+                });
+            }
+
+            // Sync selectedView and selectedLista
             setSelectedView((prev) => {
                 if (prev !== null) {
                     if (prev.type === 'list') {
@@ -209,8 +202,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                         return fresh ? { type: 'folder', folder: fresh } : prev;
                     }
                     if (prev.type === 'workspace') {
-                        const fresh = normalized.find((w) => w.pro_ide === prev.workspace.pro_ide)
-                            ?? normalizedGroup.find((w) => w.pro_ide === prev.workspace.pro_ide);
+                        const fresh = allWorkspaces.find((w) => w.pro_ide === prev.workspace.pro_ide);
                         return fresh ? { type: 'workspace', workspace: fresh } : prev;
                     }
                     if (prev.type === 'space') {
@@ -219,7 +211,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                     }
                     return prev;
                 }
-                // Restore from localStorage (F5 / hard refresh)
+
                 try {
                     const saved = localStorage.getItem('sk_selected_view');
                     if (saved) {
@@ -237,14 +229,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                             if (space) return { type: 'space', space };
                         }
                         if (type === 'workspace') {
-                            const ws = normalized.find((w) => String(w.pro_ide) === String(id))
-                                ?? normalizedGroup.find((w) => String(w.pro_ide) === String(id));
+                            const ws = allWorkspaces.find((w) => String(w.pro_ide) === String(id));
                             if (ws) return { type: 'workspace', workspace: ws };
                         }
                     }
-                } catch {
-                    // ignore
-                }
+                } catch { /* ignore */ }
                 return prev;
             });
 
@@ -253,30 +242,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
                     const fresh = allListas.find((l) => l.pro_ide === prev.pro_ide);
                     return fresh ?? prev;
                 }
-                // Restore selectedLista if the saved view is a list
-                try {
-                    const saved = localStorage.getItem('sk_selected_view');
-                    if (saved) {
-                        const { type, id } = JSON.parse(saved) as { type: string; id: string };
-                        if (type === 'list') {
-                            const lista = allListas.find((l) => String(l.pro_ide) === String(id));
-                            if (lista) return lista;
-                        }
-                    }
-                } catch {
-                    // ignore
+                const saved = localStorage.getItem('sk_selected_view');
+                if (saved) {
+                    const { type, id } = JSON.parse(saved);
+                    if (type === 'list') return allListas.find((l) => String(l.pro_ide) === String(id)) ?? null;
                 }
                 return prev;
             });
 
-            // Auto-expand on load
             if (openWorkspaces.size === 0) {
-                const ws = new Set(allWorkspaces.map((w) => w.pro_ide));
-                const sp = new Set(allWorkspaces.flatMap((w) => collectSpaces(w).map((s) => s.pro_ide)));
-                const fs = new Set(allWorkspaces.flatMap((w) => collectFolders(w).map((f) => f.pro_ide)));
-                setOpenWorkspaces(ws);
-                setOpenSpaces(sp);
-                setOpenFolders(fs);
+                setOpenWorkspaces(new Set(allWorkspaces.map((w) => w.pro_ide)));
+                setOpenSpaces(new Set(allSpaces.map((s) => s.pro_ide)));
+                setOpenFolders(new Set(allFolders.map((f) => f.pro_ide)));
             }
         } catch {
             setLoadError('Error al cargar proyectos');
@@ -284,7 +261,6 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     async function loadProyectos() {
-        const token = localStorage.getItem('sk_token');
         if (token) await loadProyectosInternal(token);
     }
 
@@ -313,13 +289,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     async function createWorkspace(name: string) {
-        if (!name.trim()) return false;
-        const token = localStorage.getItem('sk_token') ?? '';
-        const usu_ide = Number(localStorage.getItem('sk_usu_ide') ?? '0');
-
+        if (!name.trim() || !token) return false;
+        const usu_ide = storeUser?.usu_ide ?? 0;
         setWsLoading(true);
         setWsError('');
-
         try {
             const res = await skambaCrearProyecto(0, name.trim(), usu_ide, token, 'workspace');
             if (!res.success) {
@@ -337,22 +310,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    async function createItem(parentId: string, type: 'space' | 'folder' | 'list', name: string) {
-        if (!name.trim()) return false;
-        const token = localStorage.getItem('sk_token') ?? '';
-        const usu_ide = Number(localStorage.getItem('sk_usu_ide') ?? '0');
-
+    async function createItem(parentId: string, type: 'space' | 'folder' | 'list', name: string, estIdes?: number[]) {
+        if (!name.trim() || !token) return false;
+        const usu_ide = storeUser?.usu_ide ?? 0;
         try {
-            const res = await skambaCrearProyecto(
-                Number(parentId),
-                name.trim(),
-                usu_ide,
-                token,
-                type,
-            );
-            if (!res.success) {
-                return false;
-            }
+            const res = await skambaCrearProyecto(Number(parentId), name.trim(), usu_ide, token, type, type === 'list' ? estIdes : undefined);
+            if (!res.success) return false;
 
             const createdId = String(res.pro_ide ?? '');
             if (type === 'space') setOpenSpaces((p) => new Set([...p, createdId]));
@@ -364,9 +327,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
             await loadProyectosInternal(token);
             return true;
-        } catch {
-            return false;
-        }
+        } catch { return false; }
+    }
+
+    async function renameItem(pro_ide: string, newName: string) {
+        if (!newName.trim() || !token) return false;
+        try {
+            const res = await skambaEditarProyecto(token, Number(pro_ide), newName.trim());
+            if (!res.success) return false;
+            await loadProyectosInternal(token);
+            return true;
+        } catch { return false; }
+    }
+
+    async function deleteItem(pro_ide: string) {
+        if (!token) return false;
+        try {
+            const res = await skambaEliminarProyecto(token, Number(pro_ide));
+            if (!res.success) return false;
+            setSelectedView(null);
+            setSelectedLista(null);
+            localStorage.removeItem('sk_selected_view');
+            await loadProyectosInternal(token);
+            return true;
+        } catch { return false; }
     }
 
     function selectWorkspace(ws: Workspace) {
@@ -406,13 +390,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         router.push('/dashboard');
     }
 
+    const { logout: authLogout } = useAuth();
     function logout() {
-        localStorage.removeItem('sk_token');
-        localStorage.removeItem('sk_usu_ide');
-        localStorage.removeItem('sk_user');
-        localStorage.removeItem('sk_selected_view');
-        localStorage.removeItem('sk_active_workspace');
-        router.replace('/');
+        authLogout();
     }
 
     const activeWorkspace =
@@ -446,6 +426,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             toggleFolder,
             createWorkspace,
             createItem,
+            renameItem,
+            deleteItem,
             selectGrupo,
             logout,
             loadProyectos,

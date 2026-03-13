@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Lista, Tarea, Usuario, skambaUsuarios, skambaCrearTarea, skambaEditarTarea } from '../lib/api';
+import { Lista, Tarea, skambaCrearTarea, skambaEditarTarea } from '../lib/api';
+import type { Miembro } from '../lib/types/grupo';
+import { getProjectMembers } from '../lib/getProjectMembers';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
 
@@ -29,7 +31,7 @@ const getTaskMetaCounts = (tarea: Tarea) => {
 export function RowView({ lista, onRefresh }: RowViewProps) {
     const [selectedTarea, setSelectedTarea] = useState<Tarea | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+    const [usuarios, setUsuarios] = useState<Miembro[]>([]);
 
     // Quick create state
     const [quickCreateStateId, setQuickCreateStateId] = useState<string | null>(null);
@@ -40,15 +42,10 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
     const [isCreatingQuick, setIsCreatingQuick] = useState(false);
 
     useEffect(() => {
-        const token = localStorage.getItem('sk_token') ?? '';
-        skambaUsuarios(token)
-            .then(res => {
-                if (res.success && Array.isArray(res.data)) {
-                    setUsuarios(res.data);
-                }
-            })
+        getProjectMembers('', lista.pro_ide)
+            .then(setUsuarios)
             .catch(() => { });
-    }, []);
+    }, [lista.pro_ide]);
 
     const priorityStyles: Record<string, string> = {
         '1': 'text-red-600',
@@ -73,9 +70,8 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
         if (!quickTaskName.trim()) return;
 
         setIsCreatingQuick(true);
-        const token = localStorage.getItem('sk_token') ?? '';
         try {
-            const res = await skambaCrearTarea(token, {
+            const res = await skambaCrearTarea('', {
                 pro_ide: Number(lista.pro_ide),
                 tar_nom: quickTaskName.trim(),
                 tar_est: Number(estadoId),
@@ -108,11 +104,19 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
         onRefresh?.();
     }
 
+    const estadosOrdenados = [...lista.estados].sort(
+        (a, b) => Number(a.est_ord) - Number(b.est_ord)
+    );
+
+    console.log(estadosOrdenados);
+
     // Group tasks by estado
-    const grouped = lista.estados.map((estado) => ({
+    const grouped = estadosOrdenados.map((estado) => ({
         estado,
         tareas: lista.tareas.filter((t) => t.tar_est === estado.p_e_ide),
     }));
+
+
 
     return (
         <>
@@ -158,164 +162,160 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
                             {tareas.map((tarea) => {
                                 const estadoColor = lista.estados.find(e => String(e.p_e_ide) === String(tarea.tar_est))?.color ?? '#a1a1aa';
                                 const estadoNom = lista.estados.find(e => String(e.p_e_ide) === String(tarea.tar_est))?.est_nom;
-                                const asignadoNom = tarea.usu_des ? (usuarios.find(u => String(u.usu_ide) === String(tarea.usu_des))?.usu_nom ?? String(tarea.usu_des)) : null;
+                                const asignadoNom = tarea.designado_nombre ?? (tarea.usu_des ? (usuarios.find(u => String(u.usu_ide) === String(tarea.usu_des))?.usu_nom ?? String(tarea.usu_des)) : null);
                                 const { comments, files } = getTaskMetaCounts(tarea);
 
                                 return (
-                                <div
-                                    key={tarea.tar_ide}
-                                    className="w-full grid grid-cols-[28px_1fr_130px_140px_100px] gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group"
-                                >
-                                    {/* Col 1: Estado — columna propia, área de clic grande */}
-                                    <div className="relative flex items-center justify-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer" title={estadoNom}>
-                                        <span
-                                            className="w-3 h-3 rounded-full block shrink-0"
-                                            style={{ backgroundColor: estadoColor }}
-                                        />
-                                        <select
-                                            value={tarea.tar_est ?? ''}
-                                            onChange={async (e) => {
-                                                const token = localStorage.getItem('sk_token') ?? '';
-                                                await skambaEditarTarea(token, { tar_ide: Number(tarea.tar_ide), tar_est: Number(e.target.value) });
-                                                onRefresh?.();
-                                            }}
-                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                        >
-                                            {lista.estados.map(est => (
-                                                <option key={est.p_e_ide} value={est.p_e_ide}>{est.est_nom}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* Col 2: Título — único clic que abre el modal */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setSelectedTarea(tarea)}
-                                        className="min-w-0 text-left flex flex-col justify-center"
+                                    <div
+                                        key={tarea.tar_ide}
+                                        className="w-full grid grid-cols-[28px_1fr_130px_140px_100px] gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group"
                                     >
-                                        <p className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate hover:text-indigo-700 dark:hover:text-indigo-400 transition-colors">
-                                            {tarea.tar_nom}
-                                        </p>
-                                        {tarea.tar_des && (
-                                            <p className="text-xs text-zinc-400 truncate mt-0.5">
-                                                {stripHtml(tarea.tar_des)}
+                                        {/* Col 1: Estado — columna propia, área de clic grande */}
+                                        <div className="relative flex items-center justify-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer" title={estadoNom}>
+                                            <span
+                                                className="w-3 h-3 rounded-full block shrink-0"
+                                                style={{ backgroundColor: estadoColor }}
+                                            />
+                                            <select
+                                                value={tarea.tar_est ?? ''}
+                                                onChange={async (e) => {
+                                                    await skambaEditarTarea('', { tar_ide: Number(tarea.tar_ide), tar_est: Number(e.target.value) });
+                                                    onRefresh?.();
+                                                }}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            >
+                                                {lista.estados.map(est => (
+                                                    <option key={est.p_e_ide} value={est.p_e_ide}>{est.est_nom}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        {/* Col 2: Título — único clic que abre el modal */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedTarea(tarea)}
+                                            className="min-w-0 text-left flex flex-col justify-center"
+                                        >
+                                            <p className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate hover:text-indigo-700 dark:hover:text-indigo-400 transition-colors">
+                                                {tarea.tar_nom}
                                             </p>
-                                        )}
-                                        {(comments > 0 || files > 0) && (
-                                            <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-400">
-                                                {comments > 0 && (
-                                                    <span className="inline-flex items-center gap-1">
-                                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m5 6-4-3H6a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4z" />
-                                                        </svg>
-                                                        {comments}
-                                                    </span>
-                                                )}
-                                                {files > 0 && (
-                                                    <span className="inline-flex items-center gap-1">
-                                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M21.44 11.05 12.05 20.4a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.2a2 2 0 0 1-2.83-2.83l8.48-8.48" />
-                                                        </svg>
-                                                        {files}
-                                                    </span>
+                                            {tarea.tar_des && (
+                                                <p className="text-xs text-zinc-400 truncate mt-0.5">
+                                                    {stripHtml(tarea.tar_des)}
+                                                </p>
+                                            )}
+                                            {(comments > 0 || files > 0) && (
+                                                <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-400">
+                                                    {comments > 0 && (
+                                                        <span className="inline-flex items-center gap-1">
+                                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m5 6-4-3H6a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v8a4 4 0 0 1-4 4z" />
+                                                            </svg>
+                                                            {comments}
+                                                        </span>
+                                                    )}
+                                                    {files > 0 && (
+                                                        <span className="inline-flex items-center gap-1">
+                                                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M21.44 11.05 12.05 20.4a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.2a2 2 0 0 1-2.83-2.83l8.48-8.48" />
+                                                            </svg>
+                                                            {files}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </button>
+
+                                        {/* Col 3: Asignado — avatar visible + select overlay */}
+                                        <div className="relative flex items-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-1">
+                                            <div className="flex items-center gap-1.5 pointer-events-none min-w-0">
+                                                {asignadoNom ? (
+                                                    <>
+                                                        <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0">
+                                                            <span className="text-[9px] font-bold text-indigo-700 dark:text-indigo-300">
+                                                                {asignadoNom.slice(0, 2).toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">{asignadoNom}</span>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div className="w-6 h-6 rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 flex items-center justify-center shrink-0">
+                                                            <svg className="w-3 h-3 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                            </svg>
+                                                        </div>
+                                                        <span className="text-xs text-zinc-300 dark:text-zinc-600">&mdash;</span>
+                                                    </>
                                                 )}
                                             </div>
-                                        )}
-                                    </button>
-
-                                    {/* Col 3: Asignado — avatar visible + select overlay */}
-                                    <div className="relative flex items-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-1">
-                                        <div className="flex items-center gap-1.5 pointer-events-none min-w-0">
-                                            {asignadoNom ? (
-                                                <>
-                                                    <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center shrink-0">
-                                                        <span className="text-[9px] font-bold text-indigo-700 dark:text-indigo-300">
-                                                            {asignadoNom.slice(0, 2).toUpperCase()}
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">{asignadoNom}</span>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className="w-6 h-6 rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 flex items-center justify-center shrink-0">
-                                                        <svg className="w-3 h-3 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                                        </svg>
-                                                    </div>
-                                                    <span className="text-xs text-zinc-300 dark:text-zinc-600">&mdash;</span>
-                                                </>
-                                            )}
+                                            <select
+                                                value={String(tarea.usu_des ?? '')}
+                                                onChange={async (e) => {
+                                                    await skambaEditarTarea('', {
+                                                        tar_ide: Number(tarea.tar_ide),
+                                                        usu_des: e.target.value ? Number(e.target.value) : undefined,
+                                                    });
+                                                    onRefresh?.();
+                                                }}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            >
+                                                <option value="">Sin asignar</option>
+                                                {usuarios.map(u => (
+                                                    <option key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
+                                                ))}
+                                            </select>
                                         </div>
-                                        <select
-                                            value={String(tarea.usu_des ?? '')}
-                                            onChange={async (e) => {
-                                                const token = localStorage.getItem('sk_token') ?? '';
-                                                await skambaEditarTarea(token, {
-                                                    tar_ide: Number(tarea.tar_ide),
-                                                    usu_des: e.target.value ? Number(e.target.value) : undefined,
-                                                });
-                                                onRefresh?.();
-                                            }}
-                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                        >
-                                            <option value="">Sin asignar</option>
-                                            {usuarios.map(u => (
-                                                <option key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
-                                            ))}
-                                        </select>
-                                    </div>
 
-                                    {/* Col 4: Fecha — texto visible + date input overlay */}
-                                    <div className="relative flex items-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-2">
-                                        <span className="text-xs text-zinc-500 dark:text-zinc-400 pointer-events-none">
-                                            {tarea.tar_fch ?? <span className="text-zinc-300 dark:text-zinc-600">&mdash;</span>}
-                                        </span>
-                                        <input
-                                            type="date"
-                                            value={tarea.tar_fch ?? ''}
-                                            onChange={async (e) => {
-                                                const token = localStorage.getItem('sk_token') ?? '';
-                                                await skambaEditarTarea(token, {
-                                                    tar_ide: Number(tarea.tar_ide),
-                                                    tar_fch: e.target.value || undefined,
-                                                });
-                                                onRefresh?.();
-                                            }}
-                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                        />
-                                    </div>
-
-                                    {/* Col 5: Prioridad — flag visible + select overlay */}
-                                    <div className="relative flex items-center justify-end rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-1">
-                                        {tarea.pri_ide ? (
-                                            <span className={`inline-flex items-center gap-1 text-xs pointer-events-none ${priorityStyles[tarea.pri_ide] ?? 'text-zinc-400'}`}>
-                                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                                    <path d="M6 3h9.5a1 1 0 01.8.4l1.7 2.3a1 1 0 010 1.2l-1.7 2.3a1 1 0 01-.8.4H8v10a1 1 0 01-2 0V3z" />
-                                                </svg>
-                                                P{tarea.pri_ide}
+                                        {/* Col 4: Fecha — texto visible + date input overlay */}
+                                        <div className="relative flex items-center rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-2">
+                                            <span className="text-xs text-zinc-500 dark:text-zinc-400 pointer-events-none">
+                                                {tarea.tar_fch ?? <span className="text-zinc-300 dark:text-zinc-600">&mdash;</span>}
                                             </span>
-                                        ) : (
-                                            <span className="text-xs text-zinc-300 dark:text-zinc-600 pointer-events-none">&mdash;</span>
-                                        )}
-                                        <select
-                                            value={tarea.pri_ide ?? ''}
-                                            onChange={async (e) => {
-                                                const token = localStorage.getItem('sk_token') ?? '';
-                                                await skambaEditarTarea(token, {
-                                                    tar_ide: Number(tarea.tar_ide),
-                                                    pri_ide: e.target.value ? Number(e.target.value) : undefined,
-                                                });
-                                                onRefresh?.();
-                                            }}
-                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                        >
-                                            <option value="">Sin prioridad</option>
-                                            <option value="1">Alta</option>
-                                            <option value="2">Media</option>
-                                            <option value="3">Baja</option>
-                                        </select>
+                                            <input
+                                                type="date"
+                                                value={tarea.tar_fch ?? ''}
+                                                onChange={async (e) => {
+                                                    await skambaEditarTarea('', {
+                                                        tar_ide: Number(tarea.tar_ide),
+                                                        tar_fch: e.target.value || undefined,
+                                                    });
+                                                    onRefresh?.();
+                                                }}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            />
+                                        </div>
+
+                                        {/* Col 5: Prioridad — flag visible + select overlay */}
+                                        <div className="relative flex items-center justify-end rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-700/50 transition-colors cursor-pointer px-1">
+                                            {tarea.pri_ide ? (
+                                                <span className={`inline-flex items-center gap-1 text-xs pointer-events-none ${priorityStyles[tarea.pri_ide] ?? 'text-zinc-400'}`}>
+                                                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                                        <path d="M6 3h9.5a1 1 0 01.8.4l1.7 2.3a1 1 0 010 1.2l-1.7 2.3a1 1 0 01-.8.4H8v10a1 1 0 01-2 0V3z" />
+                                                    </svg>
+                                                    P{tarea.pri_ide}
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs text-zinc-300 dark:text-zinc-600 pointer-events-none">&mdash;</span>
+                                            )}
+                                            <select
+                                                value={tarea.pri_ide ?? ''}
+                                                onChange={async (e) => {
+                                                    await skambaEditarTarea('', {
+                                                        tar_ide: Number(tarea.tar_ide),
+                                                        pri_ide: e.target.value ? Number(e.target.value) : undefined,
+                                                    });
+                                                    onRefresh?.();
+                                                }}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            >
+                                                <option value="">Sin prioridad</option>
+                                                <option value="1">Alta</option>
+                                                <option value="2">Media</option>
+                                                <option value="3">Baja</option>
+                                            </select>
+                                        </div>
                                     </div>
-                                </div>
                                 );
                             })}
 

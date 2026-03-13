@@ -1,4 +1,4 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
 import type {
   SkambaResponseProyecto,
   SkambaResponseGetProyectos,
@@ -10,84 +10,93 @@ import type {
   CrearProyecto,
 } from '../types/proyecto';
 
+/**
+ * Refactored using apiClient. Token is now handled by interceptors.
+ */
+
 export async function skambaCrearProyecto(
   pro_pad: number,
   pro_nom: string,
   usu_ide: number,
-  token: string,
+  _token?: string, // Kept for backward compatibility but ignored
   pro_tip?: string,
+  est_ides?: number[],
 ): Promise<SkambaResponseProyecto<CrearProyecto>> {
   let finalProTip = pro_tip;
 
-  // Si no se envía pro_tip y pro_pad es 0 (o no se envía, asumiendo 0), es un workspace
   if (!finalProTip && (pro_pad === 0 || !pro_pad)) {
     finalProTip = 'workspace';
   }
 
-  const body: Record<string, unknown> = { pro_pad, pro_nom, usu_ide };
-  if (finalProTip) body.pro_tip = finalProTip;
+  const params = new URLSearchParams();
+  params.append('pro_pad', String(pro_pad));
+  params.append('pro_nom', pro_nom);
+  params.append('usu_ide', String(usu_ide));
+  if (finalProTip) params.append('pro_tip', finalProTip);
 
-  const response = await fetch(`${API_BASE_URL}skambaCrearProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm(body),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error en la petición de crear proyecto');
+  if (est_ides && est_ides.length > 0) {
+    for (const id of est_ides) {
+      params.append('est_ides[]', String(id));
+    }
   }
 
-  return response.json();
+  const response = await apiClient.post('skambaCrearProyecto/', params);
+  return response.data;
 }
 
 export async function skambaEditarProyecto(
-  token: string,
+  _token: string,
   pro_ide: number,
   pro_nom: string,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEditarProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ pro_ide, pro_nom }),
-  });
+  const params = new URLSearchParams();
+  params.append('pro_ide', String(pro_ide));
+  params.append('pro_nom', pro_nom);
 
-  if (!response.ok) {
-    throw new Error('Error al editar proyecto');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaEditarProyecto/', params);
+  return response.data;
 }
 
 export async function skambaConseguirProyecto(
-  token: string,
+  _token: string,
   pro_ide: number,
 ): Promise<{ success: boolean; data: Lista | Folder | Workspace }> {
-  const response = await fetch(`${API_BASE_URL}skambaConseguirProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ pro_ide }),
-  });
+  const params = new URLSearchParams();
+  params.append('pro_ide', String(pro_ide));
 
-  if (!response.ok) {
-    throw new Error('Error al obtener proyecto');
-  }
+  const response = await apiClient.post('skambaConseguirProyecto/', params);
+  return response.data;
+}
 
-  return response.json();
+export async function skambaEliminarProyecto(
+  _token: string,
+  pro_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const params = new URLSearchParams();
+  params.append('pro_ide', String(pro_ide));
+
+  const response = await apiClient.post('skambaEliminarProyecto/', params);
+  return response.data;
 }
 
 export async function skambaConseguirProyectos(
-  token: string,
+  _token: string,
+): Promise<SkambaResponseGetProyectos> {
+  const params = new URLSearchParams();
+  params.append('token',_token);
+  const response = await apiClient.post('skambaConseguirProyectos/', params, {
+    headers: { Authorization: null } as any
+  });
+  return response.data;
+}
+
+export async function skambaConseguirProyectosUsuario(
+  _token: string,
   usu_ide: number,
 ): Promise<SkambaResponseGetProyectos> {
-  const response = await fetch(`${API_BASE_URL}skambaConseguirProyectos/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ usu_ide }),
-  });
+  const params = new URLSearchParams();
+  params.append('usu_ide', String(usu_ide));
 
-  if (!response.ok) {
-    throw new Error('Error al obtener proyectos');
-  }
-
-  return response.json();
+  const response = await apiClient.post('skambaConseguirProyectosUsuario/', params);
+  return response.data;
 }

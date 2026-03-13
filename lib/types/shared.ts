@@ -21,13 +21,14 @@ export interface SkambaResponseGetProyectos {
 
 // Login types
 export interface LoginResponse {
-  usuario: any;
+  usuario: string;
   hoy: string;
-  id: number;
+  nombre: string;
+  id: string | number;
 }
 
 export interface LoginMeta {
-  usuario: any;
+  usuario: string;
   hoy: string;
   token: string;
 }

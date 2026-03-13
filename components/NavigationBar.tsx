@@ -3,6 +3,7 @@
 import { ChevronRight, Home, Folder, List, LayoutGrid, Building2 } from 'lucide-react';
 import { useDashboard } from '../context/DashboardContext';
 import type { ViewMode } from '../context/DashboardContext';
+import { ListMembersPanel } from './ListMembersPanel';
 
 interface BreadcrumbItem {
     label: string;
@@ -19,6 +20,7 @@ interface NavigationBarProps {
 
 export function NavigationBar({ showViewControls = false, currentView, onViewChange }: NavigationBarProps) {
     const { selectedView, selectWorkspace, selectSpace, selectFolder, activeWorkspace } = useDashboard();
+    const currentList = selectedView?.type === 'list' ? selectedView.lista : null;
 
     const getBreadcrumbItems = (): BreadcrumbItem[] => {
         const items: BreadcrumbItem[] = [];
@@ -56,21 +58,33 @@ export function NavigationBar({ showViewControls = false, currentView, onViewCha
                 }
 
                 case 'list': {
-                    const parentFolder = activeWorkspace?.folders.find(folder =>
-                        folder.listas.some(lista => lista.pro_ide === selectedView.lista.pro_ide)
-                    );
+                    // Find if it's in a folder or direct in a space
+                    let parentFolder: any = null;
+                    let parentSpace = activeWorkspace?.spaces?.find((s) => {
+                        // Check if it's direct in space
+                        if ((s.contenido?.listas ?? []).some(l => l.pro_ide === selectedView.lista.pro_ide)) {
+                            return true;
+                        }
+                        // Check if it's in a folder
+                        const folder = (s.contenido?.folders ?? []).find(f =>
+                            f.listas.some(lista => lista.pro_ide === selectedView.lista.pro_ide)
+                        );
+                        if (folder) {
+                            parentFolder = folder;
+                            return true;
+                        }
+                        return false;
+                    });
+
+                    if (parentSpace) {
+                        items.push({
+                            label: parentSpace.pro_nom,
+                            icon: Building2,
+                            onClick: () => selectSpace(parentSpace, activeWorkspace?.pro_ide),
+                        });
+                    }
 
                     if (parentFolder) {
-                        const parentSpace = activeWorkspace?.spaces?.find((s) =>
-                            (s.contenido?.folders ?? []).some((f) => f.pro_ide === parentFolder.pro_ide)
-                        );
-                        if (parentSpace) {
-                            items.push({
-                                label: parentSpace.pro_nom,
-                                icon: Building2,
-                                onClick: () => selectSpace(parentSpace, activeWorkspace?.pro_ide),
-                            });
-                        }
                         items.push({
                             label: parentFolder.pro_nom,
                             icon: Folder,
@@ -121,33 +135,39 @@ export function NavigationBar({ showViewControls = false, currentView, onViewCha
             </div>
 
             {/* View Controls */}
-            {showViewControls && currentView && onViewChange && (
-                <div className="flex items-center space-x-2">
-                    <span className="text-sm text-gray-500 dark:text-gray-400 mr-3">Vista:</span>
-                    <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-                        <button
-                            onClick={() => onViewChange('rows')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${currentView === 'rows'
-                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                                }`}
-                        >
-                            <List className="w-3.5 h-3.5" />
-                            Lista
-                        </button>
-                        <button
-                            onClick={() => onViewChange('kanban')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${currentView === 'kanban'
-                                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                                }`}
-                        >
-                            <LayoutGrid className="w-3.5 h-3.5" />
-                            Tablero
-                        </button>
-                    </div>
-                </div>
-            )}
+            <div className="flex items-center space-x-2">
+                {showViewControls && currentView && onViewChange && (
+                    <>
+                        <span className="text-sm text-gray-500 dark:text-gray-400 mr-3">Vista:</span>
+                        <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                            <button
+                                onClick={() => onViewChange('rows')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${currentView === 'rows'
+                                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                    }`}
+                            >
+                                <List className="w-3.5 h-3.5" />
+                                Lista
+                            </button>
+                            <button
+                                onClick={() => onViewChange('kanban')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${currentView === 'kanban'
+                                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                    }`}
+                            >
+                                <LayoutGrid className="w-3.5 h-3.5" />
+                                Tablero
+                            </button>
+                        </div>
+                    </>
+                )}
+
+                {currentList && (
+                    <ListMembersPanel lista={currentList} />
+                )}
+            </div>
         </nav>
     );
 }

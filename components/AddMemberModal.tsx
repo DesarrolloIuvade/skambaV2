@@ -8,6 +8,7 @@ import {
     skambaUsuarios,
     skambaAgregarUsuarioProyectoMiembro
 } from '../lib/api';
+import { useAuthStore } from '../context/useAuthStore';
 
 interface AddMemberModalProps {
     isOpen: boolean;
@@ -37,11 +38,11 @@ export function AddMemberModal({ isOpen, onClose, workspaceId, onSuccess }: AddM
         }
     }, [isOpen]);
 
-    async function loadData() {
-        const token = localStorage.getItem('sk_token') ?? '';
-        const usu_ide = Number(localStorage.getItem('sk_usu_ide') ?? '0');
+    const { user: storeUser } = useAuthStore();
+    const usu_ide = storeUser?.usu_ide ?? 0;
 
-        if (!token || !usu_ide) {
+    async function loadData() {
+        if (!usu_ide) {
             setError('No se pudo autenticar');
             return;
         }
@@ -50,8 +51,8 @@ export function AddMemberModal({ isOpen, onClose, workspaceId, onSuccess }: AddM
         setError('');
         try {
             const [gruposRes, usuariosRes] = await Promise.all([
-                skambaConseguirGruposUsuario(token, usu_ide),
-                skambaUsuarios(token)
+                skambaConseguirGruposUsuario('', usu_ide),
+                skambaUsuarios('')
             ]);
 
             if (gruposRes.success && gruposRes.data) {
@@ -81,7 +82,7 @@ export function AddMemberModal({ isOpen, onClose, workspaceId, onSuccess }: AddM
 
         try {
             const res = await skambaAgregarUsuarioProyectoMiembro(
-                token,
+                '',
                 Number(selectedGrupoId),
                 Number(selectedUsuarioId),
                 Number(workspaceId)

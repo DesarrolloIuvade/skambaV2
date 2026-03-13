@@ -1,82 +1,56 @@
-import { API_BASE_URL, authHeaders, toForm } from './base';
+import apiClient from './client';
+import { toForm } from './base';
 import type { Grupo, Miembro, ProyectoGrupo } from '../types/grupo';
-import type {
-  SkambaResponse,
-  SkambaResponseGetProyectos,
-} from '../types/shared';
+import type { SkambaResponseGetProyectos } from '../types/shared';
 
 // ------------------------------
-// Grupos
+// Grupos (Refactored to use apiClient)
 // ------------------------------
 
 export async function skambaCrearGrupo(
-  token: string,
+  _token: string,
   gru_nom: string,
   usu_des: number,
 ): Promise<{ success: boolean; message: string; gru_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaCrearGrupo/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_nom, usu_des }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al crear grupo');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaCrearGrupo/',
+    toForm({ gru_nom, usu_des }),
+  );
+  return response.data;
 }
 
 export async function skambaEditarGrupo(
-  token: string,
+  _token: string,
   gru_ide: number,
   gru_nom: string,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEditarGrupo/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide, gru_nom }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al editar grupo');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaEditarGrupo/',
+    toForm({ gru_ide, gru_nom }),
+  );
+  return response.data;
 }
 
 export async function skambaEliminarGrupo(
-  token: string,
+  _token: string,
   gru_ide: number,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEliminarGrupo/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al eliminar grupo');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaEliminarGrupo/',
+    toForm({ gru_ide }),
+  );
+  return response.data;
 }
 
 export async function skambaConseguirGruposUsuario(
-  token: string,
+  _token: string,
   usu_ide: number,
 ): Promise<{ success: boolean; data: Grupo[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaConseguirGruposUsuario/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ usu_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al obtener grupos del usuario');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaConseguirGruposUsuario/',
+    toForm({ usu_ide }),
+  );
+  return response.data;
 }
 
 // ------------------------------
@@ -84,56 +58,55 @@ export async function skambaConseguirGruposUsuario(
 // ------------------------------
 
 export async function skambaAgregarMiembro(
-  token: string,
+  _token: string,
   gru_ide: number,
-  usu_ide: number,
-): Promise<{ success: boolean; message: string; g_e_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaAgregarMiembro/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide, usu_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al agregar miembro al grupo');
-  }
-
-  return response.json();
+  usu_ema: string,
+): Promise<{
+  success: boolean;
+  message: string;
+  g_e_ide: number;
+  usu_ide: number;
+  usu_nom: string;
+}> {
+  const response = await apiClient.post(
+    'skambaAgregarMiembro/',
+    toForm({ gru_ide, usu_ema }),
+  );
+  return response.data;
 }
 
 export async function skambaEliminarMiembro(
-  token: string,
+  _token: string,
   gru_ide: number,
   usu_ide: number,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEliminarMiembro/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide, usu_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al eliminar miembro del grupo');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaEliminarMiembro/',
+    toForm({ gru_ide, usu_ide }),
+  );
+  return response.data;
 }
 
 export async function skambaConseguirMiembros(
-  token: string,
+  _token: string,
   gru_ide: number,
 ): Promise<{ success: boolean; data: Miembro[] }> {
-  const response = await fetch(`${API_BASE_URL}skambaConseguirMiembros/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide }),
-  });
+  const response = await apiClient.post(
+    'skambaConseguirMiembros/',
+    toForm({ gru_ide }),
+  );
+  return response.data;
+}
 
-  if (!response.ok) {
-    throw new Error('Error al obtener miembros del grupo');
-  }
-
-  return response.json();
+export async function skambaMiembrosProyecto(
+  _token: string,
+  pro_ide: number,
+): Promise<{ success: boolean; data: Miembro[]; message?: string }> {
+  const response = await apiClient.post(
+    'skambaMiembrosProyecto/',
+    toForm({ pro_ide }),
+  );
+  return response.data;
 }
 
 // ------------------------------
@@ -141,121 +114,86 @@ export async function skambaConseguirMiembros(
 // ------------------------------
 
 export async function skambaAgregarGrupoProyecto(
-  token: string,
+  _token: string,
   gru_ide: number,
   pro_ide: number,
 ): Promise<{ success: boolean; message: string; gpp_ide: number }> {
-  const response = await fetch(`${API_BASE_URL}skambaAgregarGrupoProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gru_ide, pro_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al vincular grupo con proyecto');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaAgregarGrupoProyecto/',
+    toForm({ gru_ide, pro_ide }),
+  );
+  return response.data;
 }
 
 export async function skambaEliminarGrupoProyecto(
-  token: string,
+  _token: string,
   gpp_ide: number,
 ): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(`${API_BASE_URL}skambaEliminarGrupoProyecto/`, {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: toForm({ gpp_ide }),
-  });
-
-  if (!response.ok) {
-    throw new Error('Error al desvincular grupo del proyecto');
-  }
-
-  return response.json();
+  const response = await apiClient.post(
+    'skambaEliminarGrupoProyecto/',
+    toForm({ gpp_ide }),
+  );
+  return response.data;
 }
 
 export async function skambaConseguirProyectosGrupo(
-  token: string,
+  _token: string,
   usu_ide: number,
   gru_ide: number,
 ): Promise<{
   success: boolean;
   data: ProyectoGrupo[];
 }> {
-  const response = await fetch(
-    `${API_BASE_URL}skambaConseguirProyectosGrupo/`,
-    {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: toForm({ usu_ide, gru_ide }),
-    },
+  const response = await apiClient.post(
+    'skambaConseguirProyectosGrupo/',
+    toForm({ usu_ide, gru_ide }),
   );
-
-  if (!response.ok) {
-    throw new Error('Error al obtener proyectos del grupo');
-  }
-
-  return response.json();
+  return response.data;
 }
 
 export async function skambaConseguirProyectosUsuarios(
-  token: string,
+  _token: string,
   usu_ide: number,
 ): Promise<SkambaResponseGetProyectos> {
-  const response = await fetch(
-    `${API_BASE_URL}skambaConseguirProyectosUsuarios/`,
-    {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: toForm({ usu_ide }),
-    },
+  const response = await apiClient.post(
+    'skambaConseguirProyectosUsuarios/',
+    toForm({ usu_ide }),
   );
-
-  if (!response.ok) {
-    throw new Error('Error al obtener proyectos del usuario en grupo');
-  }
-
-  return response.json();
+  return response.data;
 }
 
-export async function skambaConseguirProyectosUsuario(
-  token: string,
+export async function skambaConseguirProyectosUsuarioGet(
+  _token: string,
   usu_ide: number,
 ): Promise<any> {
-  const response = await fetch(
-    `${API_BASE_URL}skambaConseguirProyectosUsuario/?usu_ide=${usu_ide}`,
-    {
-      method: 'GET',
-      headers: authHeaders(token),
-    },
+  // Note: The original was using GET with query params, keep that behavior
+  const response = await apiClient.get(
+    `skambaConseguirProyectosUsuario/?usu_ide=${usu_ide}`,
   );
+  return response.data;
+}
 
-  if (!response.ok) {
-    throw new Error('Error al obtener workspaces del usuario miembro');
-  }
-
-  return response.json();
+export async function skambaConseguirProyectosGrupoUsuario(
+  _token: string,
+  gru_ide: number,
+  usu_ide: number,
+): Promise<{ success: boolean; data: any[] }> {
+  const response = await apiClient.post(
+    'skambaConseguirProyectosGrupoUsuario/',
+    toForm({ gru_ide, usu_ide }),
+  );
+  return response.data;
 }
 
 export async function skambaAgregarUsuarioProyectoMiembro(
-  token: string,
+  _token: string,
   gru_ide: number,
   usu_ide: number,
   pro_ide: number,
 ): Promise<{ success: boolean; message: string; p_m_ide: string }> {
-  const response = await fetch(
-    `${API_BASE_URL}skambaAgregarUsuarioProyectoMiembro/`,
-    {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: toForm({ gru_ide, usu_ide, pro_ide }),
-    },
+  const response = await apiClient.post(
+    'skambaAgregarUsuarioProyectoMiembro/',
+    toForm({ gru_ide, usu_ide, pro_ide }),
   );
-
-  if (!response.ok) {
-    throw new Error('Error al agregar usuario al proyecto miembro');
-  }
-
-  return response.json();
+  return response.data;
 }

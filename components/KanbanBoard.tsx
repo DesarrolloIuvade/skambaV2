@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Lista, Tarea, EstadoProyecto, Usuario, skambaUsuarios, skambaEditarTarea } from '../lib/api';
+import { Lista, Tarea, EstadoProyecto, skambaEditarTarea } from '../lib/api';
+import { getProjectMembers } from '../lib/getProjectMembers';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
 
@@ -38,17 +39,14 @@ export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
     const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        const token = localStorage.getItem('sk_token') ?? '';
-        skambaUsuarios(token)
-            .then(res => {
-                if (res.success && Array.isArray(res.data)) {
-                    const map: Record<string, string> = {};
-                    (res.data as Usuario[]).forEach(u => { map[String(u.usu_ide)] = u.usu_nom; });
-                    setUsuariosMap(map);
-                }
+        getProjectMembers('', lista.pro_ide)
+            .then(members => {
+                const map: Record<string, string> = {};
+                members.forEach(m => { map[String(m.usu_ide)] = m.usu_nom; });
+                setUsuariosMap(map);
             })
             .catch(() => { });
-    }, []);
+    }, [lista.pro_ide]);
 
     const tareasPorEstado = (estado: EstadoProyecto): Tarea[] =>
         lista.tareas.filter((t) => t.tar_est === estado.p_e_ide);
@@ -64,8 +62,7 @@ export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
     }
 
     async function handleChangeEstado(tarea: Tarea, newEstadoId: string) {
-        const token = localStorage.getItem('sk_token') ?? '';
-        await skambaEditarTarea(token, { tar_ide: Number(tarea.tar_ide), tar_est: Number(newEstadoId) });
+        await skambaEditarTarea('', { tar_ide: Number(tarea.tar_ide), tar_est: Number(newEstadoId) });
         onRefresh?.();
     }
 
@@ -98,7 +95,7 @@ export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
                                 <div className="flex flex-col gap-2">
                                     {tareas.map((tarea) => {
                                         const { comments, files } = getTaskMetaCounts(tarea);
-                                        const nombreAsignado = tarea.usu_des ? (usuariosMap[String(tarea.usu_des)] ?? String(tarea.usu_des)) : null;
+                                        const nombreAsignado = tarea.designado_nombre ?? (tarea.usu_des ? (usuariosMap[String(tarea.usu_des)] ?? String(tarea.usu_des)) : null);
 
                                         return (
                                             <button

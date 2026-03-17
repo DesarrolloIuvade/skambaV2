@@ -6,12 +6,7 @@ import {
     Lista,
     Tarea,
     Miembro,
-    Usuario,
-    skambaConseguirGruposUsuario,
-    skambaConseguirProyectosGrupo,
-    skambaConseguirMiembros,
-    skambaUsuarios,
-    skambaAgregarUsuarioProyectoMiembro,
+    skambaMiembrosProyecto,
 } from '../lib/api';
 import { useAuthStore } from '../context/useAuthStore';
 import { useDashboard } from '../context/DashboardContext';
@@ -21,11 +16,6 @@ import { TaskCreateModal } from './TaskCreateModal';
 interface WorkspaceViewProps {
     workspace: Workspace;
     onSelectList: (lista: Lista) => void;
-}
-
-interface GrupoConWs {
-    gru_ide: number;
-    gru_nom: string;
 }
 
 type StatusCategory = 'inprogress' | 'pending' | 'completed' | 'other';
@@ -101,53 +91,20 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     const otherTasks = taskRows.filter((t) => t.cat === 'other');
 
     // --- Members panel state ---
-    const [gruposConWs, setGruposConWs] = useState<GrupoConWs[]>([]);
     const [miembros, setMiembros] = useState<Miembro[]>([]);
-    const [allUsers, setAllUsers] = useState<Usuario[]>([]);
     const [loadingMembers, setLoadingMembers] = useState(false);
-    const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
-    const [selectedGruIde, setSelectedGruIde] = useState<number | ''>('');
-    const [adding, setAdding] = useState(false);
     const [addError, setAddError] = useState('');
 
     const { user: storeUser } = useAuthStore();
-    const usuIde = storeUser?.usu_ide ?? 0;
 
     const loadMembers = useCallback(async () => {
-        if (!usuIde) return;
-
         setLoadingMembers(true);
         try {
             const proIde = Number(workspace.pro_ide);
-            const [gruposRes, usersRes] = await Promise.all([
-                skambaConseguirGruposUsuario('', usuIde),
-                skambaUsuarios(''),
-            ]);
-            const grupos = gruposRes.data ?? [];
-            const proyResults = await Promise.all(
-                grupos.map((g) => skambaConseguirProyectosGrupo('', usuIde, g.gru_ide)),
-            );
-            const filtered: GrupoConWs[] = grupos
-                .filter((_g, i) => proyResults[i].data?.some((p) => p.pro_ide === proIde))
-                .map((g) => ({ gru_ide: g.gru_ide, gru_nom: g.gru_nom }));
-
-            setGruposConWs(filtered);
-            if (filtered.length === 1) setSelectedGruIde(filtered[0].gru_ide);
-            else setSelectedGruIde('');
-
-            if (filtered.length > 0) {
-                const memberSets = await Promise.all(
-                    filtered.map((g) => skambaConseguirMiembros('', g.gru_ide)),
-                );
-                const map = new Map<number, Miembro>();
-                memberSets.forEach((r) => r.data?.forEach((m) => map.set(m.usu_ide, m)));
-                setMiembros(Array.from(map.values()));
-            } else {
-                setMiembros([]);
-            }
-            setAllUsers(usersRes.data ?? []);
+            const res = await skambaMiembrosProyecto('', proIde);
+            setMiembros(res.data ?? []);
         } catch {
-            // silently ignore
+            setMiembros([]);
         } finally {
             setLoadingMembers(false);
         }
@@ -156,33 +113,6 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     useEffect(() => {
         loadMembers();
     }, [loadMembers]);
-
-    const handleAddUser = async () => {
-        if (!selectedUserId || !selectedGruIde) return;
-        setAdding(true);
-        setAddError('');
-        try {
-            const res = await skambaAgregarUsuarioProyectoMiembro(
-                '',
-                Number(selectedGruIde),
-                Number(selectedUserId),
-                Number(workspace.pro_ide),
-            );
-            if (res.success) {
-                setSelectedUserId('');
-                await loadMembers();
-            } else {
-                setAddError('No se pudo agregar el usuario');
-            }
-        } catch {
-            setAddError('Error al agregar usuario');
-        } finally {
-            setAdding(false);
-        }
-    };
-
-    const memberIds = new Set(miembros.map((m) => m.usu_ide));
-    const availableUsers = allUsers.filter((u) => !memberIds.has(u.usu_ide));
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -327,14 +257,9 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     {loadingMembers ? (
                         <p className="text-xs text-zinc-400 text-center py-4">Cargando...</p>
-                    ) : gruposConWs.length === 0 ? (
-                        <div className="text-center py-6">
-                            <p className="text-xs text-zinc-400">Sin grupo vinculado.</p>
-                            <p className="text-xs text-zinc-400 mt-1">Vincúlalo desde Grupos.</p>
-                        </div>
                     ) : miembros.length === 0 ? (
                         <p className="text-xs text-zinc-400 text-center py-4">
-                            Sin miembros en los grupos vinculados.
+                            Sin miembros en este proyecto.
                         </p>
                     ) : (
                         <div className="space-y-1">
@@ -358,62 +283,6 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                                     </div>
                                 </div>
                             ))}
-                        </div>
-                    )}
-
-                    {gruposConWs.length > 0 && (
-                        <div className="pt-3 border-t border-zinc-200 dark:border-zinc-700 space-y-2">
-                            <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                                Agregar usuario
-                            </p>
-
-                            {gruposConWs.length > 1 && (
-                                <select
-                                    value={selectedGruIde}
-                                    onChange={(e) =>
-                                        setSelectedGruIde(
-                                            e.target.value === '' ? '' : Number(e.target.value),
-                                        )
-                                    }
-                                    className="w-full text-xs border border-zinc-300 dark:border-zinc-600 rounded-lg px-2.5 py-1.5 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                >
-                                    <option value="">Seleccionar grupo...</option>
-                                    {gruposConWs.map((g) => (
-                                        <option key={g.gru_ide} value={g.gru_ide}>
-                                            {g.gru_nom}
-                                        </option>
-                                    ))}
-                                </select>
-                            )}
-
-                            <select
-                                value={selectedUserId}
-                                onChange={(e) =>
-                                    setSelectedUserId(
-                                        e.target.value === '' ? '' : Number(e.target.value),
-                                    )
-                                }
-                                className="w-full text-xs border border-zinc-300 dark:border-zinc-600 rounded-lg px-2.5 py-1.5 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                            >
-                                <option value="">Seleccionar usuario...</option>
-                                {availableUsers.map((u) => (
-                                    <option key={u.usu_ide} value={u.usu_ide}>
-                                        {u.usu_nom}
-                                    </option>
-                                ))}
-                            </select>
-
-                            <button
-                                onClick={handleAddUser}
-                                disabled={!selectedUserId || !selectedGruIde || adding}
-                                className="w-full text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
-                            >
-                                {adding ? 'Agregando...' : 'Agregar'}
-                            </button>
-
-                            {addError && (
-                                <p className="text-[11px] text-red-500">{addError}</p>
-                            )}
                         </div>
                     )}
                 </div>

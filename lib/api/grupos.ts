@@ -197,3 +197,26 @@ export async function skambaAgregarUsuarioProyectoMiembro(
   );
   return response.data;
 }
+
+export async function skambaAgregarUsuariosLista(
+  _token: string,
+  usu_ema: string,
+  pro_ide: number,
+): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.post(
+    'skambaAgregarUsuariosLista/',
+    toForm({ usu_ema, pro_ide }),
+  );
+  return response.data;
+}
+
+export async function skambaMostrarProyectosMiembro(
+  _token: string,
+  usu_ide: number,
+): Promise<{ success: boolean; data: any[] }> {
+  const response = await apiClient.post(
+    'skambaMostrarProyectosMiembro/',
+    toForm({ usu_ide }),
+  );
+  return response.data;
+}

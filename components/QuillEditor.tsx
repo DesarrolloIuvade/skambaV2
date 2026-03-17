@@ -67,6 +67,19 @@ export function QuillEditor({ value, onChange, placeholder, minHeight = 160 }: Q
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Sincronizar cambios de "value" que provienen desde fuera (ej: al terminar de cargar el API)
+    useEffect(() => {
+        if (!quillRef.current) return;
+        const currentHtml = quillRef.current.root.innerHTML;
+        // Si el valor cambia por el fetch externamente y no es el mismo que tiene el editor
+        if (value !== currentHtml && value !== '<p><br></p>') {
+            const isJustEmpty = value === '' && currentHtml === '<p><br></p>';
+            if (!isJustEmpty) {
+                quillRef.current.clipboard.dangerouslyPasteHTML(0, value || '');
+            }
+        }
+    }, [value]);
+
     return (
         <div
             ref={wrapperRef}

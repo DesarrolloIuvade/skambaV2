@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import {
     skambaConseguirGruposUsuario,

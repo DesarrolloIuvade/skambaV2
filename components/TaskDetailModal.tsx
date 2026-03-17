@@ -59,7 +59,12 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailM
 
 
 
+    const initialized = useRef(false);
+
     useEffect(() => {
+        if (initialized.current) return;
+        initialized.current = true;
+
         const init = async () => {
             setTaskLoading(true);
             try {
@@ -264,45 +269,49 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailM
 
                     <span className="text-zinc-200 dark:text-zinc-700 select-none text-lg">|</span>
 
-                    {/* Logs Dropdown Toggle */}
-                    <div className="relative group/logs">
+                    {/* Botón de Historial tipo Dropdown */}
+                    <div className="relative">
                         <button
                             type="button"
-                            onMouseEnter={() => loadLogs()}
+                            onClick={() => {
+                                if (!showLogs) loadLogs();
+                                setShowLogs(!showLogs);
+                            }}
                             className="p-2 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
                             title="Ver historial de cambios"
                         >
                             <History className="w-5 h-5" />
                         </button>
-                        {/* Dropdown content on hover */}
-                        <div className="absolute left-0 top-full mt-1 w-80 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-700 p-3 hidden group-hover/logs:block z-[70] max-h-64 overflow-y-auto">
-                            <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 px-1">Historial</h4>
-                            {logsLoading ? (
-                                <p className="text-xs text-zinc-400 py-2 text-center">Cargando...</p>
-                            ) : logs.length === 0 ? (
-                                <p className="text-xs text-zinc-400 py-2 text-center italic">Sin cambios aún</p>
-                            ) : (
-                                <div className="space-y-4">
-                                    {logs.map(log => {
-                                        const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
-                                        const estado = lista.estados.find(e => String(e.p_e_ide) === String(log.tar_est));
-                                        return (
-                                            <div key={log.t_e_ide} className="flex gap-2">
-                                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-[11px] text-zinc-700 dark:text-zinc-300 leading-snug">
-                                                        <span className="font-semibold">{autor?.usu_nom ?? `User#${log.usu_ide}`}</span>
-                                                        {' movió a '}
-                                                        <span className="font-semibold text-indigo-500">{estado?.est_nom ?? `Estado#${log.tar_est}`}</span>
-                                                    </p>
-                                                    <p className="text-[9px] text-zinc-400 mt-0.5">{log.t_e_tim}</p>
+
+                        {/* Contenido del Dropdown */}
+                        {showLogs && (
+                            <div className="absolute left-0 top-full mt-1 w-80 bg-white dark:bg-zinc-800 rounded-lg shadow-xl border border-zinc-200 dark:border-zinc-700 p-3 z-[70] max-h-64 overflow-y-auto">
+                                <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 px-1">Historial</h4>
+                                {logsLoading ? (
+                                    <p className="text-xs text-zinc-400 py-2 text-center">Cargando...</p>
+                                ) : logs.length === 0 ? (
+                                    <p className="text-xs text-zinc-400 py-2 text-center italic">Sin cambios aún</p>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {logs.map(log => {
+                                            return (
+                                                <div key={log.t_e_ide} className="flex gap-2">
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-[11px] text-zinc-700 dark:text-zinc-300 leading-snug">
+                                                            <span className="font-semibold">{log.usu_nom ?? `User#${log.usu_ide}`}</span>
+                                                            {' movió a '}
+                                                            <span className="font-semibold text-indigo-500">{log.est_nom ?? `Estado#${log.p_e_ide ?? log.tar_est}`}</span>
+                                                        </p>
+                                                        <p className="text-[9px] text-zinc-400 mt-0.5">{log.t_e_tim}</p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex-1" />
@@ -328,63 +337,6 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailM
                         </svg>
                     </button>
                 </div>
-
-                {/* ── LOGS POPUP ── */}
-                {showLogs && (
-                    <div
-                        className="fixed inset-0 bg-black/40 flex items-center justify-center z-60 p-4"
-                        onClick={() => setShowLogs(false)}
-                    >
-                        <div
-                            className="bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-md border border-zinc-200 dark:border-zinc-800 overflow-hidden"
-                            onClick={e => e.stopPropagation()}
-                        >
-                            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
-                                <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
-                                    <History className="w-4 h-4" />
-                                    Historial de cambios
-                                </h3>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowLogs(false)}
-                                    className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-                                >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                </button>
-                            </div>
-                            <div className="max-h-80 overflow-y-auto px-5 py-4">
-                                {logsLoading ? (
-                                    <p className="text-sm text-zinc-400 text-center py-6">Cargando...</p>
-                                ) : logs.length === 0 ? (
-                                    <p className="text-sm text-zinc-400 italic text-center py-6">Sin historial aún</p>
-                                ) : (
-                                    <ol className="relative border-l border-zinc-200 dark:border-zinc-700 space-y-4">
-                                        {logs.map(log => {
-                                            const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
-                                            const estado = lista.estados.find(e => String(e.p_e_ide) === String(log.tar_est));
-                                            return (
-                                                <li key={log.t_e_ide} className="ml-4">
-                                                    <div className="absolute -left-1.5 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white dark:border-zinc-900" />
-                                                    <p className="text-xs text-zinc-400 mb-0.5">{log.t_e_tim}</p>
-                                                    <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                                                        <span className="font-medium">{autor?.usu_nom ?? `Usuario #${log.usu_ide}`}</span>
-                                                        {' cambió el estado a '}
-                                                        <span
-                                                            className="inline-block px-1.5 py-0.5 rounded text-xs font-semibold text-white"
-                                                            style={{ backgroundColor: estado?.color ?? '#a1a1aa' }}
-                                                        >
-                                                            {estado?.est_nom ?? `#${log.tar_est}`}
-                                                        </span>
-                                                    </p>
-                                                </li>
-                                            );
-                                        })}
-                                    </ol>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* ── MIDDLE: left content + right comments ── */}
                 <div className="flex flex-1 min-h-0">

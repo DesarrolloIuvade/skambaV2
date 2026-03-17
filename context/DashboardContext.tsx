@@ -1,10 +1,11 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import {
     skambaConseguirProyectos,
     skambaConseguirProyectosUsuario,
+    skambaMostrarProyectosMiembro,
     skambaCrearProyecto,
     skambaEditarProyecto,
     skambaEliminarProyecto,
@@ -102,6 +103,7 @@ function normalizeWorkspace(raw: Workspace): Workspace {
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
     const router = useRouter();
+    const pathname = usePathname();
     const [user, setUser] = useState<User | null>(null);
     const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
     const [groupWorkspaces, setGroupWorkspaces] = useState<Workspace[]>([]);
@@ -151,16 +153,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
         setLoadError('');
         try {
-            const [res, groupRes] = await Promise.all([
+            const [res, groupRes, memberRes] = await Promise.all([
                 skambaConseguirProyectos(tk),
                 skambaConseguirProyectosUsuario(tk, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] })),
+                skambaMostrarProyectosMiembro(tk, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] }))
             ]);
 
             let normalizedGroup: Workspace[] = [];
             if (groupRes.success && groupRes.data) {
                 normalizedGroup = groupRes.data.map(normalizeWorkspace);
-                setGroupWorkspaces(normalizedGroup);
             }
+            if (memberRes.success && memberRes.data) {
+                const memberWorkspaces = memberRes.data.map(normalizeWorkspace);
+                // Evitamos duplicados con los de grupos si los hubiera (basado en pro_ide)
+                const existingIds = new Set(normalizedGroup.map(w => w.pro_ide));
+                for (const mw of memberWorkspaces) {
+                    if (!existingIds.has(mw.pro_ide)) {
+                        normalizedGroup.push(mw);
+                    }
+                }
+            }
+            setGroupWorkspaces(normalizedGroup);
 
             let normalized: Workspace[] = [];
             if (res.success && res.data) {
@@ -358,7 +371,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSelectedView({ type: 'workspace', workspace: ws });
         setSelectedLista(null);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'workspace', id: ws.pro_ide }));
-        router.push('/dashboard');
+        if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectSpace(space: Space, workspaceId?: string) {
@@ -366,28 +379,28 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setSelectedView({ type: 'space', space });
         setSelectedLista(null);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'space', id: space.pro_ide }));
-        router.push('/dashboard');
+        if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectFolder(folder: Folder) {
         setSelectedView({ type: 'folder', folder });
         setSelectedLista(null);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'folder', id: folder.pro_ide }));
-        router.push('/dashboard');
+        if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectLista(lista: Lista) {
         setSelectedView({ type: 'list', lista });
         setSelectedLista(lista);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'list', id: lista.pro_ide }));
-        router.push('/dashboard');
+        if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectGrupo(grupo: Grupo) {
         setSelectedView({ type: 'group', grupo });
         setSelectedLista(null);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'group', id: String(grupo.gru_ide) }));
-        router.push('/dashboard');
+        if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     const { logout: authLogout } = useAuth();

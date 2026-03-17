@@ -14,7 +14,10 @@ export async function skambaCrearTarea(
   token: string,
   params: CrearTareaParams,
 ): Promise<{ success: boolean; message: string; tar_ide: number }> {
-  const response = await apiClient.post('skambaCrearTarea/', toForm({ ...params, token }));
+  const response = await apiClient.post(
+    'skambaCrearTarea/',
+    toForm({ ...params, token }),
+  );
   return response.data;
 }
 
@@ -30,7 +33,10 @@ export async function skambaVerTareas(
   _token: string,
   pro_ide: number,
 ): Promise<{ success: boolean; data: Tarea[] }> {
-  const response = await apiClient.post('skambaVerTareas/', toForm({ pro_ide }));
+  const response = await apiClient.post(
+    'skambaVerTareas/',
+    toForm({ pro_ide }),
+  );
   return response.data;
 }
 
@@ -45,9 +51,14 @@ export async function skambaVerTarea(
 export interface TareaLog {
   t_e_ide: string;
   tar_ide: string;
-  tar_est: string;
+  tar_nom?: string;
+  tar_est?: string;
+  p_e_ide?: string;
+  est_ide?: string;
+  est_nom?: string;
   t_e_tim: string;
   usu_ide: string;
+  usu_nom?: string;
   est_ado: string;
 }
 
@@ -56,7 +67,7 @@ export async function skambaLogsTareas(
   tar_ide: number,
 ): Promise<{ success: boolean; data: TareaLog[] }> {
   const response = await apiClient.get('skambaLogsTareas/', {
-    params: { tar_ide }
+    params: { tar_ide },
   });
   return response.data;
 }

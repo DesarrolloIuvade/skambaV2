@@ -6,7 +6,6 @@ import {
     Usuario,
     skambaConseguirGruposUsuario,
     skambaUsuarios,
-    skambaAgregarUsuarioProyectoMiembro
 } from '../lib/api';
 import { useAuthStore } from '../context/useAuthStore';
 
@@ -76,24 +75,14 @@ export function AddMemberModal({ isOpen, onClose, workspaceId, onSuccess }: AddM
     async function handleAdd() {
         if (!selectedGrupoId || !selectedUsuarioId) return;
 
-        const token = localStorage.getItem('sk_token') ?? '';
         setAdding(true);
         setError('');
 
         try {
-            const res = await skambaAgregarUsuarioProyectoMiembro(
-                '',
-                Number(selectedGrupoId),
-                Number(selectedUsuarioId),
-                Number(workspaceId)
-            );
-
-            if (res.success) {
-                onSuccess();
-                onClose();
-            } else {
-                setError(res.message || 'No se pudo agregar el miembro');
-            }
+            // Endpoint no disponible - funcionalidad deshabilitada
+            setError('Esta funcionalidad no está disponible temporalmente');
+            setAdding(false);
+            return;
         } catch (err) {
             setError('Error al agregar miembro al workspace');
         } finally {

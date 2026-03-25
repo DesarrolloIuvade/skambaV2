@@ -1,4 +1,5 @@
 import type { Tarea, EstadoProyecto } from './tarea';
+import type { Miembro } from './grupo';
 
 export interface Lista {
   pro_ide: string;
@@ -9,6 +10,7 @@ export interface Lista {
   pro_tip: 'list';
   tareas: Tarea[];
   estados: EstadoProyecto[];
+  miembros?: Miembro[];
 }
 
 export interface Folder {

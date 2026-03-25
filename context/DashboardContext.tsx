@@ -4,8 +4,8 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { useRouter, usePathname } from 'next/navigation';
 import {
     skambaConseguirProyectos,
-    skambaConseguirProyectosUsuario,
-    skambaMostrarProyectosMiembro,
+    skambaConseguirProyectosGrupoUsuarioPorUsuario,
+    skambaConseguirProyecto,
     skambaCrearProyecto,
     skambaEditarProyecto,
     skambaEliminarProyecto,
@@ -67,6 +67,8 @@ interface DashboardContextType {
     setCreatingWs: (v: boolean) => void;
     wsLoading: boolean;
     wsError: string;
+    miembros: any[];
+    setMiembros: (miembros: any[]) => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
@@ -101,6 +103,271 @@ function normalizeWorkspace(raw: Workspace): Workspace {
     };
 }
 
+function toListaFromNode(node: any, parentId: string): Lista {
+    return {
+        pro_ide: String(node?.pro_ide ?? ''),
+        pro_nom: String(node?.pro_nom ?? 'Lista'),
+        usu_ide: String(node?.usu_ide ?? '0'),
+        pro_pad: parentId,
+        est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
+        pro_tip: 'list',
+        tareas: Array.isArray(node?.tareas) ? node.tareas : [],
+        estados: Array.isArray(node?.estados) ? node.estados : [],
+        miembros: Array.isArray(node?.miembros) ? node.miembros : [],
+    };
+}
+
+function collectDescendantLists(node: any, parentId: string): Lista[] {
+    const tip = String(node?.pro_tip ?? '').toLowerCase();
+    if (tip === 'list') return [toListaFromNode(node, parentId)];
+
+    const children = Array.isArray(node?.children) ? node.children : [];
+    return children.flatMap((child: any) => collectDescendantLists(child, parentId));
+}
+
+function toFolderFromNode(node: any, parentId: string): Folder {
+    const children = Array.isArray(node?.children) ? node.children : [];
+    const listas: Lista[] = [];
+
+    for (const child of children) {
+        const tip = String(child?.pro_tip ?? '').toLowerCase();
+        if (tip === 'list') {
+            listas.push(toListaFromNode(child, String(node.pro_ide)));
+        } else {
+            listas.push(...collectDescendantLists(child, String(node.pro_ide)));
+        }
+    }
+
+    return {
+        pro_ide: String(node?.pro_ide ?? ''),
+        pro_nom: String(node?.pro_nom ?? 'Folder'),
+        usu_ide: String(node?.usu_ide ?? '0'),
+        pro_pad: parentId,
+        est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
+        pro_tip: 'folder',
+        listas,
+    };
+}
+
+function toSpaceFromNode(node: any, parentId: string): Space {
+    const children = Array.isArray(node?.children) ? node.children : [];
+    const folders: Folder[] = [];
+    const listas: Lista[] = [];
+
+    for (const child of children) {
+        const tip = String(child?.pro_tip ?? '').toLowerCase();
+        if (tip === 'folder') {
+            folders.push(toFolderFromNode(child, String(node.pro_ide)));
+        }
+        if (tip === 'list') {
+            listas.push(toListaFromNode(child, String(node.pro_ide)));
+        }
+    }
+
+    return {
+        pro_ide: String(node?.pro_ide ?? ''),
+        pro_nom: String(node?.pro_nom ?? 'Space'),
+        usu_ide: String(node?.usu_ide ?? '0'),
+        pro_pad: parentId,
+        est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
+        pro_tip: 'space',
+        contenido: { folders, listas },
+    };
+}
+
+function createSyntheticSpaceForWorkspace(ws: Workspace): Space {
+    return {
+        pro_ide: `${ws.pro_ide}__root`,
+        pro_nom: 'General',
+        usu_ide: ws.usu_ide,
+        pro_pad: ws.pro_ide,
+        est_ado: ws.est_ado,
+        pro_tip: 'space',
+        contenido: { folders: [], listas: [] },
+    };
+}
+
+function toWorkspaceFromTreeRoot(node: any): Workspace {
+    const tip = String(node?.pro_tip ?? '').toLowerCase();
+    const proIde = String(node?.pro_ide ?? '');
+    const ws = {
+        pro_ide: proIde,
+        pro_nom: String(node?.pro_nom ?? 'Workspace'),
+        usu_ide: String(node?.usu_ide ?? '0'),
+        pro_pad: String(node?.pro_pad ?? '0'),
+        est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
+        pro_tip: 'workspace',
+        spaces: [],
+        pro_tip_original: (tip === 'workspace' || tip === 'space' || tip === 'folder' || tip === 'list') ? tip : 'workspace',
+    } as Workspace & { pro_tip_original: 'workspace' | 'space' | 'folder' | 'list' };
+
+    if (tip === 'workspace') {
+        const children = Array.isArray(node?.children) ? node.children : [];
+        for (const child of children) {
+            const childTip = String(child?.pro_tip ?? '').toLowerCase();
+            if (childTip === 'space') {
+                ws.spaces.push(toSpaceFromNode(child, ws.pro_ide));
+                continue;
+            }
+
+            // Si llegan folders/listas colgando directo del root, los agregamos en un space virtual.
+            const synthetic = ws.spaces.find((s) => s.pro_ide === `${ws.pro_ide}__root`) ?? createSyntheticSpaceForWorkspace(ws);
+            if (!ws.spaces.some((s) => s.pro_ide === synthetic.pro_ide)) ws.spaces.push(synthetic);
+
+            if (childTip === 'folder') synthetic.contenido.folders.push(toFolderFromNode(child, synthetic.pro_ide));
+            if (childTip === 'list') synthetic.contenido.listas.push(toListaFromNode(child, synthetic.pro_ide));
+        }
+        return ws;
+    }
+
+    if (tip === 'space') {
+        ws.spaces.push(toSpaceFromNode(node, ws.pro_ide));
+        return ws;
+    }
+
+    const synthetic = createSyntheticSpaceForWorkspace(ws);
+    if (tip === 'folder') synthetic.contenido.folders.push(toFolderFromNode(node, synthetic.pro_ide));
+    if (tip === 'list') synthetic.contenido.listas.push(toListaFromNode(node, synthetic.pro_ide));
+    ws.spaces.push(synthetic);
+    return ws;
+}
+
+function buildGroupWorkspacesFromFlat(rawItems: any[]): Workspace[] {
+    const dedupByProId = new Map<string, any>();
+    for (const item of rawItems) {
+        const id = String(item?.pro_ide ?? '');
+        if (!id) continue;
+        if (!dedupByProId.has(id)) dedupByProId.set(id, item);
+    }
+
+    const wsById = new Map<string, Workspace>();
+    const spaceById = new Map<string, Space>();
+    const folderById = new Map<string, Folder>();
+    const listById = new Map<string, Lista>();
+
+    for (const item of dedupByProId.values()) {
+        const id = String(item.pro_ide);
+        const parentId = String(item.pro_pad ?? '0');
+        const estado = String(item.proyecto_estado ?? item.pro_est_ado ?? '1');
+        const usuIde = String(item.usu_ide ?? '0');
+        const tip = String(item.pro_tip ?? '').toLowerCase();
+
+        if (tip === 'workspace') {
+            wsById.set(id, {
+                pro_ide: id,
+                pro_nom: String(item.pro_nom ?? 'Workspace'),
+                usu_ide: usuIde,
+                pro_pad: parentId,
+                est_ado: estado,
+                pro_tip: 'workspace',
+                spaces: [],
+            });
+        }
+
+        if (tip === 'space') {
+            spaceById.set(id, {
+                pro_ide: id,
+                pro_nom: String(item.pro_nom ?? 'Space'),
+                usu_ide: usuIde,
+                pro_pad: parentId,
+                est_ado: estado,
+                pro_tip: 'space',
+                contenido: { folders: [], listas: [] },
+            });
+        }
+
+        if (tip === 'folder') {
+            folderById.set(id, {
+                pro_ide: id,
+                pro_nom: String(item.pro_nom ?? 'Folder'),
+                usu_ide: usuIde,
+                pro_pad: parentId,
+                est_ado: estado,
+                pro_tip: 'folder',
+                listas: [],
+            });
+        }
+
+        if (tip === 'list') {
+            listById.set(id, {
+                pro_ide: id,
+                pro_nom: String(item.pro_nom ?? 'Lista'),
+                usu_ide: usuIde,
+                pro_pad: parentId,
+                est_ado: estado,
+                pro_tip: 'list',
+                tareas: [],
+                estados: [],
+                miembros: [],
+            });
+        }
+    }
+
+    for (const space of spaceById.values()) {
+        const parentWs = wsById.get(space.pro_pad);
+        if (parentWs && !parentWs.spaces.some((s) => s.pro_ide === space.pro_ide)) {
+            parentWs.spaces.push(space);
+        }
+    }
+
+    for (const folder of folderById.values()) {
+        const parentSpace = spaceById.get(folder.pro_pad);
+        if (parentSpace && !parentSpace.contenido.folders.some((f) => f.pro_ide === folder.pro_ide)) {
+            parentSpace.contenido.folders.push(folder);
+        }
+    }
+
+    for (const lista of listById.values()) {
+        const parentFolder = folderById.get(lista.pro_pad);
+        if (parentFolder) {
+            if (!parentFolder.listas.some((l) => l.pro_ide === lista.pro_ide)) {
+                parentFolder.listas.push(lista);
+            }
+            continue;
+        }
+
+        const parentSpace = spaceById.get(lista.pro_pad);
+        if (parentSpace && !parentSpace.contenido.listas.some((l) => l.pro_ide === lista.pro_ide)) {
+            parentSpace.contenido.listas.push(lista);
+        }
+    }
+
+    const sortByName = <T extends { pro_nom: string }>(arr: T[]) => {
+        arr.sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
+    };
+
+    for (const ws of wsById.values()) {
+        sortByName(ws.spaces);
+        for (const sp of ws.spaces) {
+            sortByName(sp.contenido.folders);
+            sortByName(sp.contenido.listas);
+            for (const fo of sp.contenido.folders) sortByName(fo.listas);
+        }
+    }
+
+    return Array.from(wsById.values()).sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
+}
+
+function buildGroupWorkspacesFromResponse(rawItems: any[]): Workspace[] {
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    if (items.length === 0) return [];
+
+    const hasTreeResponse = items.some((item) => Array.isArray(item?.children));
+    if (!hasTreeResponse) {
+        return buildGroupWorkspacesFromFlat(items).map(normalizeWorkspace);
+    }
+
+    const dedupRoots = new Map<string, any>();
+    for (const root of items) {
+        const id = String(root?.pro_ide ?? '');
+        if (!id) continue;
+        if (!dedupRoots.has(id)) dedupRoots.set(id, root);
+    }
+
+    const workspaces = Array.from(dedupRoots.values()).map((root) => normalizeWorkspace(toWorkspaceFromTreeRoot(root)));
+    return workspaces.sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
+}
+
 export function DashboardProvider({ children }: { children: ReactNode }) {
     const router = useRouter();
     const pathname = usePathname();
@@ -121,7 +388,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const [creatingWs, setCreatingWs] = useState(false);
     const [wsLoading, setWsLoading] = useState(false);
     const [wsError, setWsError] = useState('');
-
+    const [miembros, setMiembros] = useState<any[]>([]);
     const { user: storeUser, token } = useAuthStore();
 
     // Persist activeWorkspaceId automatically whenever it changes
@@ -153,25 +420,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
         setLoadError('');
         try {
-            const [res, groupRes, memberRes] = await Promise.all([
+            const [res, groupRes] = await Promise.all([
                 skambaConseguirProyectos(tk),
-                skambaConseguirProyectosUsuario(tk, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] })),
-                skambaMostrarProyectosMiembro(tk, usu_ide).catch(() => ({ success: false, data: [] as Workspace[] }))
+                // Reemplaza al endpoint anterior que pintaba workspaces de grupo.
+                skambaConseguirProyectosGrupoUsuarioPorUsuario('', usu_ide).catch(() => ({ success: false, data: [] as any[] })),
             ]);
 
             let normalizedGroup: Workspace[] = [];
             if (groupRes.success && groupRes.data) {
-                normalizedGroup = groupRes.data.map(normalizeWorkspace);
-            }
-            if (memberRes.success && memberRes.data) {
-                const memberWorkspaces = memberRes.data.map(normalizeWorkspace);
-                // Evitamos duplicados con los de grupos si los hubiera (basado en pro_ide)
-                const existingIds = new Set(normalizedGroup.map(w => w.pro_ide));
-                for (const mw of memberWorkspaces) {
-                    if (!existingIds.has(mw.pro_ide)) {
-                        normalizedGroup.push(mw);
-                    }
-                }
+                const groupItems = Array.isArray(groupRes.data) ? groupRes.data : [];
+                normalizedGroup = buildGroupWorkspacesFromResponse(groupItems);
             }
             setGroupWorkspaces(normalizedGroup);
 
@@ -390,9 +648,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
 
     function selectLista(lista: Lista) {
-        setSelectedView({ type: 'list', lista });
-        setSelectedLista(lista);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'list', id: lista.pro_ide }));
+
+        // Para listas de grupo, el árbol puede venir sin tareas; intentamos traer el detalle real por pro_ide.
+        if (token) {
+            skambaConseguirProyecto(token, Number(lista.pro_ide))
+                .then((res) => {
+                    if (res.success && res.data && (res.data as any).pro_tip === 'list') {
+                        const fresh = res.data as Lista;
+                        setSelectedView({ type: 'list', lista: fresh });
+                        setSelectedLista(fresh);
+                        return;
+                    }
+                    setSelectedView({ type: 'list', lista });
+                    setSelectedLista(lista);
+                })
+                .catch(() => {
+                    setSelectedView({ type: 'list', lista });
+                    setSelectedLista(lista);
+                });
+        } else {
+            setSelectedView({ type: 'list', lista });
+            setSelectedLista(lista);
+        }
+
         if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
@@ -448,6 +727,8 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             setCreatingWs,
             wsLoading,
             wsError,
+            miembros,
+            setMiembros,
         }}>
             {children}
         </DashboardContext.Provider>

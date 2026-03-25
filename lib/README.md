@@ -86,7 +86,7 @@ import type { Workspace } from '@/lib/types';
 - `skambaEditarProyecto(token, pro_ide, pro_nom)`
 - `skambaConseguirProyecto(token, pro_ide)`
 - `skambaConseguirProyectos(token, usu_ide)`
-- `skambaConseguirProyectosGrupo(token, usu_ide, gru_ide)`
+- `skambaConseguirProyectosGrupo(token, gru_ide)`
 - `skambaConseguirProyectosUsuarios(token, usu_ide)`
 
 ### tareas.ts

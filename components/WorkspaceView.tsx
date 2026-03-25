@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Workspace,
     Lista,
     Tarea,
     Miembro,
-    skambaMiembrosProyecto,
 } from '../lib/api';
 import { useAuthStore } from '../context/useAuthStore';
 import { useDashboard } from '../context/DashboardContext';
@@ -91,28 +90,25 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     const otherTasks = taskRows.filter((t) => t.cat === 'other');
 
     // --- Members panel state ---
-    const [miembros, setMiembros] = useState<Miembro[]>([]);
-    const [loadingMembers, setLoadingMembers] = useState(false);
-    const [addError, setAddError] = useState('');
-
-    const { user: storeUser } = useAuthStore();
-
-    const loadMembers = useCallback(async () => {
-        setLoadingMembers(true);
-        try {
-            const proIde = Number(workspace.pro_ide);
-            const res = await skambaMiembrosProyecto('', proIde);
-            setMiembros(res.data ?? []);
-        } catch {
-            setMiembros([]);
-        } finally {
-            setLoadingMembers(false);
+    // Collect members from all listas in the workspace (deduplicated by p_m_ide or usu_ide)
+    const miembros: Miembro[] = listsWithPaths.reduce((acc: Miembro[], lista) => {
+        if (lista.miembros && lista.miembros.length > 0) {
+            lista.miembros.forEach(m => {
+                // Deduplicar por p_m_ide si existe, sino por usu_ide
+                const existingIndex = acc.findIndex(existing =>
+                    (m.p_m_ide && existing.p_m_ide === m.p_m_ide) ||
+                    (!m.p_m_ide && existing.usu_ide === m.usu_ide)
+                );
+                if (existingIndex === -1) {
+                    acc.push(m);
+                }
+            });
         }
-    }, [workspace.pro_ide]);
+        return acc;
+    }, []);
 
-    useEffect(() => {
-        loadMembers();
-    }, [loadMembers]);
+    const [addError, setAddError] = useState('');
+    const { user: storeUser } = useAuthStore();
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -255,9 +251,7 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {loadingMembers ? (
-                        <p className="text-xs text-zinc-400 text-center py-4">Cargando...</p>
-                    ) : miembros.length === 0 ? (
+                    {miembros.length === 0 ? (
                         <p className="text-xs text-zinc-400 text-center py-4">
                             Sin miembros en este proyecto.
                         </p>

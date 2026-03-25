@@ -1,9 +1,11 @@
 'use client';
 
-import { ChevronRight, Home, Folder, List, LayoutGrid, Building2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { ChevronRight, Home, Folder, List, LayoutGrid, Building2, ChevronDown } from 'lucide-react';
 import { useDashboard } from '../context/DashboardContext';
 import type { ViewMode } from '../context/DashboardContext';
 import { ListMembersPanel } from './ListMembersPanel';
+import { ProjectTree } from './ProjectTree';
 
 interface BreadcrumbItem {
     label: string;
@@ -19,8 +21,24 @@ interface NavigationBarProps {
 }
 
 export function NavigationBar({ showViewControls = false, currentView, onViewChange }: NavigationBarProps) {
-    const { selectedView, selectWorkspace, selectSpace, selectFolder, activeWorkspace } = useDashboard();
+    const { selectedView, selectWorkspace, selectSpace, selectFolder, activeWorkspace, miembros } = useDashboard();
     const currentList = selectedView?.type === 'list' ? selectedView.lista : null;
+    const [showProjectTree, setShowProjectTree] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setShowProjectTree(false);
+            }
+        }
+
+        if (showProjectTree) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [showProjectTree]);
 
     const getBreadcrumbItems = (): BreadcrumbItem[] => {
         const items: BreadcrumbItem[] = [];
@@ -109,29 +127,53 @@ export function NavigationBar({ showViewControls = false, currentView, onViewCha
 
     return (
         <nav className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4">
-            {/* Breadcrumbs */}
-            <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                {breadcrumbItems.map((item, index) => (
-                    <div key={index} className="flex items-center">
-                        {index > 0 && (
-                            <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
-                        )}
+            {/* Project Selector Dropdown */}
+            <div className="flex items-center gap-2" ref={dropdownRef}>
+                <div className="relative">
+                    <button
+                        onClick={() => setShowProjectTree(!showProjectTree)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-sm font-medium text-gray-700 dark:text-gray-200"
+                    >
+                        <Folder className="w-4 h-4" />
+                        <span className="hidden sm:inline">Proyectos</span>
+                        <ChevronDown className={`w-4 h-4 transition-transform ${showProjectTree ? 'rotate-180' : ''}`} />
+                    </button>
 
-                        <button
-                            onClick={item.onClick}
-                            disabled={!item.onClick || item.isActive}
-                            className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${item.isActive
-                                ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20'
-                                : item.onClick
-                                    ? 'hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                    : 'cursor-default'
-                                }`}
-                        >
-                            <item.icon className="w-4 h-4" />
-                            <span className="font-medium">{item.label}</span>
-                        </button>
-                    </div>
-                ))}
+                    {/* Dropdown Menu */}
+                    {showProjectTree && (
+                        <div className="absolute top-full left-0 mt-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50 w-64">
+                            <ProjectTree onClose={() => setShowProjectTree(false)} />
+                        </div>
+                    )}
+                </div>
+
+                {/* Separator */}
+                <div className="h-8 w-px bg-gray-300 dark:bg-gray-600" />
+
+                {/* Breadcrumbs */}
+                <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                    {breadcrumbItems.map((item, index) => (
+                        <div key={index} className="flex items-center">
+                            {index > 0 && (
+                                <ChevronRight className="w-4 h-4 mx-2 text-gray-400" />
+                            )}
+
+                            <button
+                                onClick={item.onClick}
+                                disabled={!item.onClick || item.isActive}
+                                className={`flex items-center space-x-1 px-2 py-1 rounded-md transition-colors ${item.isActive
+                                    ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20'
+                                    : item.onClick
+                                        ? 'hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        : 'cursor-default'
+                                    }`}
+                            >
+                                <item.icon className="w-4 h-4" />
+                                <span className="font-medium">{item.label}</span>
+                            </button>
+                        </div>
+                    ))}
+                </div>
             </div>
 
             {/* View Controls */}
@@ -165,7 +207,7 @@ export function NavigationBar({ showViewControls = false, currentView, onViewCha
                 )}
 
                 {currentList && (
-                    <ListMembersPanel lista={currentList} />
+                    <ListMembersPanel lista={currentList} miembros={miembros} />
                 )}
             </div>
         </nav>

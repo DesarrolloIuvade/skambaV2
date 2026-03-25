@@ -5,6 +5,7 @@ import type {
   CrearTareaParams,
   EditarTareaParams,
 } from '../types/tarea';
+import type { Miembro } from '../types/grupo';
 
 // ------------------------------
 // Tareas (Refactored to use apiClient)
@@ -32,7 +33,7 @@ export async function skambaEditarTarea(
 export async function skambaVerTareas(
   _token: string,
   pro_ide: number,
-): Promise<{ success: boolean; data: Tarea[] }> {
+): Promise<{ success: boolean; data: Tarea[]; miembros?: Miembro[] }> {
   const response = await apiClient.post(
     'skambaVerTareas/',
     toForm({ pro_ide }),
@@ -43,9 +44,16 @@ export async function skambaVerTareas(
 export async function skambaVerTarea(
   _token: string,
   tar_ide: number,
-): Promise<Tarea | null> {
-  const response = await apiClient.post('skambaVerTarea/', toForm({ tar_ide }));
-  return response.data.success ? response.data.data : null;
+): Promise<{ success: boolean; data?: Tarea; miembros?: Miembro[] }> {
+  try {
+    const response = await apiClient.post(
+      'skambaVerTarea/',
+      toForm({ tar_ide }),
+    );
+    return response.data;
+  } catch (error) {
+    return { success: false };
+  }
 }
 
 export interface TareaLog {

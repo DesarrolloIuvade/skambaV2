@@ -8,45 +8,34 @@ import {
     type Miembro,
 } from '../lib/api';
 import { useAuthStore } from '../context/useAuthStore';
-import { getProjectMembers } from '../lib/getProjectMembers';
+// quitamos esto el endpint skambaVerTareas ya lo pide 
+// import { getProjectMembers } from '../lib/getProjectMembers';
 
 interface ListMembersPanelProps {
     lista: Lista;
+    miembros?: Miembro[];
 }
 
-export function ListMembersPanel({ lista }: ListMembersPanelProps) {
+export function ListMembersPanel({ lista, miembros = [] }: ListMembersPanelProps) {
     const { user: storeUser } = useAuthStore();
     const [isOpen, setIsOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-    const [listMembers, setListMembers] = useState<Miembro[]>([]);
+    const [listMembers, setListMembers] = useState<Miembro[]>(miembros);
     const [email, setEmail] = useState('');
 
     const usuIde = storeUser?.usu_ide ?? 0;
 
     useEffect(() => {
-        void loadPanelData();
-    }, [lista.pro_ide]);
-
-    async function loadPanelData() {
-        setLoading(true);
-        setError('');
-
-        try {
-            const members = await getProjectMembers('', lista.pro_ide);
-            setListMembers(members);
-        } catch (loadError) {
-            console.error('Error loading list members panel:', loadError);
-            setError('No se pudo cargar la configuración de miembros.');
-        } finally {
-            setLoading(false);
-        }
-    }
+        setListMembers(miembros);
+    }, [miembros]);
 
     async function refreshMembers() {
-        await loadPanelData();
+        // Miembros ya vienen de la respuesta de skambaVerTareas,
+        // así que no necesitamos hacer una llamada separada
+        // Esta función puede quedar como es por si futura necesidad
     }
 
     async function handleAddByEmail(e: React.FormEvent) {
@@ -71,7 +60,8 @@ export function ListMembersPanel({ lista }: ListMembersPanelProps) {
 
             setEmail('');
             setSuccess('Usuario agregado a la lista.');
-            await refreshMembers();
+            // No necesitamos refreshMembers aquí porque esperamos que
+            // el padre llame a onRefresh que en ListView hace un nuevo skambaVerTareas
         } catch (submitError) {
             console.error('Error adding user by email:', submitError);
             setError('Error al agregar el usuario por email.');

@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   output: 'export',
-  basePath: '/skamba',
+  basePath: '/skamba_demo',
   trailingSlash: true,
   images: {
     unoptimized: true,

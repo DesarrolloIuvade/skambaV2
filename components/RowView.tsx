@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react';
 import { Lista, Tarea, skambaCrearTarea, skambaEditarTarea } from '../lib/api';
 import type { Miembro } from '../lib/types/grupo';
-import { getProjectMembers } from '../lib/getProjectMembers';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
 
 interface RowViewProps {
     lista: Lista;
     onRefresh?: () => void;
+    miembros?: Miembro[];
 }
 
 const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '');
@@ -28,10 +28,10 @@ const getTaskMetaCounts = (tarea: Tarea) => {
     return { comments, files };
 };
 
-export function RowView({ lista, onRefresh }: RowViewProps) {
+export function RowView({ lista, onRefresh, miembros = [] }: RowViewProps) {
     const [selectedTarea, setSelectedTarea] = useState<Tarea | null>(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
-    const [usuarios, setUsuarios] = useState<Miembro[]>([]);
+    const [usuarios, setUsuarios] = useState<Miembro[]>(miembros);
 
     // Quick create state
     const [quickCreateStateId, setQuickCreateStateId] = useState<string | null>(null);
@@ -42,10 +42,8 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
     const [isCreatingQuick, setIsCreatingQuick] = useState(false);
 
     useEffect(() => {
-        getProjectMembers('', lista.pro_ide)
-            .then(setUsuarios)
-            .catch(() => { });
-    }, [lista.pro_ide]);
+        setUsuarios(miembros);
+    }, [miembros]);
 
     const priorityStyles: Record<string, string> = {
         '1': 'text-red-600',
@@ -426,6 +424,7 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
                     lista={lista}
                     onClose={() => setSelectedTarea(null)}
                     onUpdate={handleTaskUpdated}
+                    miembros={usuarios}
                 />
             )}
 
@@ -434,6 +433,7 @@ export function RowView({ lista, onRefresh }: RowViewProps) {
                     lista={lista}
                     onClose={() => setShowCreateModal(false)}
                     onCreated={handleTaskCreated}
+                    miembros={usuarios}
                 />
             )}
         </>

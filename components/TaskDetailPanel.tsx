@@ -17,6 +17,7 @@ import {
     skambaConseguirArchivo,
     skambaUsuarios,
     skambaVerTareas,
+    skambaVerTarea,
     skambaLogsTareas,
     type TareaLog,
 } from '../lib/api';
@@ -94,10 +95,17 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         setDescripcion(tarea.tar_des || '');
         setFecha(tarea.tar_fch || '');
         setEstadoId(tarea.tar_est);
-        setUsuDesId(tarea.usu_des ?? '');
+
+        let resolvedUsuDesId = tarea.usu_des ? String(tarea.usu_des) : '';
+        if (!resolvedUsuDesId && tarea.designado_nombre) {
+            const member = usuarios.find(m => m.usu_nom === tarea.designado_nombre);
+            if (member) resolvedUsuDesId = String(member.usu_ide);
+        }
+        setUsuDesId(resolvedUsuDesId);
+
         setPriId(tarea.pri_ide ?? '');
         setTarPadId(tarea.tar_pad ?? '');
-    }, [tarea]);
+    }, [tarea, usuarios]);
 
     // Eager load so tab badges appear immediately on panel open
     useEffect(() => {

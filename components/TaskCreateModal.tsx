@@ -10,7 +10,6 @@ import {
     skambaLogsTareas, type TareaLog,
 } from '../lib/api';
 import type { Miembro } from '../lib/types/grupo';
-import { getProjectMembers } from '../lib/getProjectMembers';
 import { QuillEditor } from './QuillEditor';
 import { getCookie } from 'cookies-next';
 
@@ -19,6 +18,7 @@ interface TaskCreateModalProps {
     defaultEstadoId?: string;
     onClose: () => void;
     onCreated: () => void;
+    miembros?: Miembro[];
 }
 
 const priorityOptions = [
@@ -28,7 +28,7 @@ const priorityOptions = [
     { id: '3', label: 'Baja', bg: '#10b981' },
 ];
 
-export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated }: TaskCreateModalProps) {
+export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated, miembros = [] }: TaskCreateModalProps) {
     const initialEstado = defaultEstadoId ?? lista.estados[0]?.p_e_ide ?? '';
 
     const [nombre, setNombre] = useState('');
@@ -40,7 +40,7 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated }: 
     const [saving, setSaving] = useState(false);
     const [isMaximized, setIsMaximized] = useState(false);
     const [error, setError] = useState('');
-    const [usuarios, setUsuarios] = useState<Miembro[]>([]);
+    const [usuarios, setUsuarios] = useState<Miembro[]>(miembros);
 
     // After creation
     const [createdTareaId, setCreatedTareaId] = useState<number | null>(null);
@@ -60,10 +60,8 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated }: 
 
 
     useEffect(() => {
-        getProjectMembers('', lista.pro_ide)
-            .then(setUsuarios)
-            .catch(() => { });
-    }, [lista.pro_ide]);
+        setUsuarios(miembros);
+    }, [miembros]);
 
     async function loadComentarios(tarId: number) {
         try {

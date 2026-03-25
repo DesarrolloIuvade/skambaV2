@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useDashboard } from '../context/DashboardContext';
 import { ChevronIcon, FolderIcon, ListIcon, PlusIcon, CheckIcon } from './Icons';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, Building2, Layers3, Folder as LucideFolder, ClipboardList } from 'lucide-react';
 import {
     Folder, Lista, Space, Grupo, Plantilla,
     skambaConseguirGruposUsuario, skambaMostrarPlantillas,
@@ -84,6 +84,21 @@ export function Sidebar() {
         return name.charAt(0).toUpperCase() || 'W';
     }
 
+    const isActiveGroupWorkspace = !!activeWorkspace && groupWorkspaces.some((w) => String(w.pro_ide) === String(activeWorkspace.pro_ide));
+
+    function getGroupProTip(ws: any): 'workspace' | 'space' | 'folder' | 'list' {
+        const tip = String(ws?.pro_tip_original ?? ws?.pro_tip ?? 'workspace').toLowerCase();
+        if (tip === 'space' || tip === 'folder' || tip === 'list' || tip === 'workspace') return tip;
+        return 'workspace';
+    }
+
+    function GroupTipIcon({ tip }: { tip: 'workspace' | 'space' | 'folder' | 'list' }) {
+        if (tip === 'folder') return <LucideFolder className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+        if (tip === 'list') return <ClipboardList className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+        if (tip === 'space') return <Layers3 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+        return <Building2 className="w-3.5 h-3.5 text-indigo-500 shrink-0" />;
+    }
+
     return (
         <aside className="w-64 bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full shrink-0">
             {/* Workspace Switcher Header */}
@@ -96,9 +111,14 @@ export function Sidebar() {
                         <div className="w-6 h-6 rounded bg-indigo-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
                             {activeWorkspace ? getWorkspaceInitial(activeWorkspace.pro_nom) : '?'}
                         </div>
-                        <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate">
-                            {activeWorkspace?.pro_nom || 'Seleccionar Workspace'}
-                        </span>
+                        <div className="min-w-0 flex-1 flex items-center justify-between gap-2">
+                            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate">
+                                {activeWorkspace?.pro_nom || 'Seleccionar Workspace'}
+                            </span>
+                            {isActiveGroupWorkspace && (
+                                <GroupTipIcon tip={getGroupProTip(activeWorkspace as any)} />
+                            )}
+                        </div>
                     </div>
                     <div className={`transition-transform duration-200 ${isSwitcherOpen ? 'rotate-180' : ''} text-zinc-500`}>
                         <ChevronIcon open={false} />
@@ -142,15 +162,17 @@ export function Sidebar() {
                                             <button
                                                 key={ws.pro_ide}
                                                 onClick={() => { selectWorkspace(ws); setIsSwitcherOpen(false); }}
-                                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-left text-sm"
+                                                className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-left text-sm"
                                             >
-                                                <div className="w-5 h-5 rounded bg-indigo-200 dark:bg-indigo-800 flex items-center justify-center text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
-                                                    {getWorkspaceInitial(ws.pro_nom)}
+                                                <div className="min-w-0 flex items-center gap-2 flex-1">
+                                                    <div className="w-5 h-5 rounded bg-indigo-200 dark:bg-indigo-800 flex items-center justify-center text-indigo-700 dark:text-indigo-300 text-[10px] font-bold">
+                                                        {getWorkspaceInitial(ws.pro_nom)}
+                                                    </div>
+                                                    <span className={`flex-1 truncate ${activeWorkspace?.pro_ide === ws.pro_ide ? 'font-medium text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
+                                                        {ws.pro_nom}
+                                                    </span>
                                                 </div>
-                                                <span className={`flex-1 truncate ${activeWorkspace?.pro_ide === ws.pro_ide ? 'font-medium text-zinc-900 dark:text-zinc-100' : 'text-zinc-600 dark:text-zinc-400'}`}>
-                                                    {ws.pro_nom}
-                                                </span>
-                                                {activeWorkspace?.pro_ide === ws.pro_ide && <CheckIcon />}
+                                                <GroupTipIcon tip={getGroupProTip(ws as any)} />
                                             </button>
                                         ))}
                                     </div>
@@ -685,7 +707,7 @@ function GruposSection() {
         if (!newGrupoName.trim()) return;
         setCreatingGrupo(true);
         try {
-            const res = await skambaCrearGrupo(getToken(), newGrupoName.trim(), getUsuIde());
+            const res = await skambaCrearGrupo(getToken(), newGrupoName.trim());
             if (res.success) {
                 setNewGrupoName('');
                 setShowCreateForm(false);

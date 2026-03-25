@@ -2,13 +2,15 @@
 
 import { useState, useEffect } from 'react';
 import { Lista, Tarea, EstadoProyecto, skambaEditarTarea } from '../lib/api';
-import { getProjectMembers } from '../lib/getProjectMembers';
+import { Miembro } from '../lib/api';
+// import { getProjectMembers } from '../lib/getProjectMembers';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
 
 interface KanbanBoardProps {
     lista: Lista;
     onRefresh?: () => void;
+    miembros?: Miembro[];
 }
 
 const stripHtml = (html: string) => html.replace(/<[^>]*>/g, '');
@@ -33,20 +35,18 @@ const priorityColors: Record<string, string> = {
     '3': 'text-emerald-500',
 };
 
-export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
+export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProps) {
     const [selectedTarea, setSelectedTarea] = useState<Tarea | null>(null);
     const [createEstadoId, setCreateEstadoId] = useState<string | null>(null);
     const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
 
     useEffect(() => {
-        getProjectMembers('', lista.pro_ide)
-            .then(members => {
-                const map: Record<string, string> = {};
-                members.forEach(m => { map[String(m.usu_ide)] = m.usu_nom; });
-                setUsuariosMap(map);
-            })
-            .catch(() => { });
-    }, [lista.pro_ide]);
+        if (miembros && miembros.length > 0) {
+            const map: Record<string, string> = {};
+            miembros.forEach(m => { map[String(m.usu_ide)] = m.usu_nom; });
+            setUsuariosMap(map);
+        }
+    }, [miembros]);
 
     const tareasPorEstado = (estado: EstadoProyecto): Tarea[] =>
         lista.tareas.filter((t) => t.tar_est === estado.p_e_ide);
@@ -213,6 +213,7 @@ export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
                     lista={lista}
                     onClose={() => setSelectedTarea(null)}
                     onUpdate={handleTaskUpdated}
+                    miembros={miembros}
                 />
             )}
 
@@ -222,6 +223,7 @@ export function KanbanBoard({ lista, onRefresh }: KanbanBoardProps) {
                     defaultEstadoId={createEstadoId}
                     onClose={() => setCreateEstadoId(null)}
                     onCreated={handleTaskCreated}
+                    miembros={miembros}
                 />
             )}
         </>

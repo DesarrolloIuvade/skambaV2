@@ -12,9 +12,12 @@ interface ListViewProps {
     onRefresh?: () => void;
 }
 
+import type { Miembro } from '../lib/api';
+
 export function ListView({ lista, onRefresh }: ListViewProps) {
-    const { viewMode } = useDashboard();
+    const { viewMode, setMiembros: setContextMiembros } = useDashboard();
     const [tasks, setTasks] = useState<Tarea[]>(lista.tareas || []);
+    const [miembros, setMiembros] = useState<Miembro[]>([]);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -23,7 +26,22 @@ export function ListView({ lista, onRefresh }: ListViewProps) {
             try {
                 const res = await skambaVerTareas('', Number(lista.pro_ide));
                 if (res.success) {
-                    setTasks(res.data);
+                    // Map the response data to ensure tar_est is set from est_nom
+                    const mappedTasks = res.data.map((tarea: any) => {
+                        if (!tarea.tar_est && tarea.est_nom) {
+                            // Find the estado ID based on est_nom
+                            const estado = lista.estados.find(e => e.est_nom === tarea.est_nom);
+                            return {
+                                ...tarea,
+                                tar_est: estado?.p_e_ide || tarea.tar_est,
+                            };
+                        }
+                        return tarea;
+                    });
+                    setTasks(mappedTasks);
+                    const m = res.miembros || [];
+                    setMiembros(m);
+                    setContextMiembros(m);
                 }
             } catch (error) {
                 console.error("Error fetching tasks:", error);
@@ -32,14 +50,29 @@ export function ListView({ lista, onRefresh }: ListViewProps) {
             }
         };
         fetchTasks();
-    }, [lista.pro_ide]);
+    }, [lista.pro_ide, lista.estados, setContextMiembros]);
 
     const handleRefresh = async () => {
         setLoading(true);
         try {
             const res = await skambaVerTareas('', Number(lista.pro_ide));
             if (res.success) {
-                setTasks(res.data);
+                // Map the response data to ensure tar_est is set from est_nom
+                const mappedTasks = res.data.map((tarea: any) => {
+                    if (!tarea.tar_est && tarea.est_nom) {
+                        // Find the estado ID based on est_nom
+                        const estado = lista.estados.find(e => e.est_nom === tarea.est_nom);
+                        return {
+                            ...tarea,
+                            tar_est: estado?.p_e_ide || tarea.tar_est,
+                        };
+                    }
+                    return tarea;
+                });
+                setTasks(mappedTasks);
+                const m = res.miembros || [];
+                setMiembros(m);
+                setContextMiembros(m);
             }
         } finally {
             setLoading(false);
@@ -59,9 +92,9 @@ export function ListView({ lista, onRefresh }: ListViewProps) {
             {/* View content */}
             <div className="flex-1 min-h-0 overflow-auto">
                 {viewMode === 'rows' ? (
-                    <RowView lista={updatedLista} onRefresh={handleRefresh} />
+                    <RowView lista={updatedLista} onRefresh={handleRefresh} miembros={miembros} />
                 ) : (
-                    <KanbanBoard lista={updatedLista} onRefresh={handleRefresh} />
+                    <KanbanBoard lista={updatedLista} onRefresh={handleRefresh} miembros={miembros} />
                 )}
             </div>
         </div>

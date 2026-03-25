@@ -5,18 +5,29 @@ import { useDashboard } from '../context/DashboardContext';
 import {
     skambaConseguirGruposUsuario,
     skambaConseguirProyectosGrupo,
-    skambaConseguirProyectosGrupoUsuario,
     skambaConseguirMiembros,
     skambaAgregarGrupoProyecto,
     skambaEliminarGrupoProyecto,
-    skambaAgregarUsuarioProyectoMiembro,
     skambaCrearGrupo,
     skambaAgregarMiembro,
     skambaEliminarMiembro,
+    skambaConseguirProyecto,
 } from '../lib/api';
 import { useAuthStore } from '../context/useAuthStore';
 import type { Grupo, Miembro, ProyectoGrupo } from '../lib/types/grupo';
 import type { Workspace, Space, Folder, Lista } from '../lib/types/proyecto';
+
+// Tipo auxiliar para proyectos vinculados con metadata del grupo
+type ProyectoVinculado = (Workspace | Space | Folder | Lista) & {
+    gpp_ide: number;
+    p_m_ide?: string;
+    usu_ide?: string;
+    p_m_gen?: string;
+    miembro_estado?: string;
+    proyecto_estado?: string;
+    tree?: any[];
+    children?: any[];
+};
 
 export function GrupoView({ grupo }: { grupo?: Grupo }) {
     const { workspaces, loadProyectos } = useDashboard();
@@ -26,8 +37,8 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     const [selectedGrupo, setSelectedGrupo] = useState<Grupo | null>(grupo ?? null);
     const [loadingGrupos, setLoadingGrupos] = useState(true);
 
-    // Proyectos del grupo seleccionado
-    const [proyectos, setProyectos] = useState<ProyectoGrupo[]>([]);
+    // Proyectos del grupo seleccionado (con estructura completa)
+    const [proyectos, setProyectos] = useState<ProyectoVinculado[]>([]);
     const [loadingProyectos, setLoadingProyectos] = useState(false);
 
     // Miembros del grupo seleccionado
@@ -67,13 +78,19 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
     const { user: storeUser } = useAuthStore();
     const usuIde = storeUser?.usu_ide ?? 0;
 
-    const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+    const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
 
     useEffect(() => {
         loadGrupos();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (grupo) {
+            setSelectedGrupo(grupo);
+        }
+    }, [grupo?.gru_ide]);
 
     useEffect(() => {
         if (selectedGrupo) {
@@ -155,9 +172,26 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         if (!selectedGrupo) return;
         setLoadingProyectos(true);
         try {
-            const res = await skambaConseguirProyectosGrupo('', usuIde, selectedGrupo.gru_ide);
+            const res = await skambaConseguirProyectosGrupo('', selectedGrupo.gru_ide);
             if (res.success && res.data) {
-                setProyectos(res.data);
+                const dataArray = Array.isArray(res.data) ? res.data : [];
+                const mapped = dataArray.map((item: any) => {
+                    return {
+                        p_m_ide: item.p_m_ide,
+                        pro_ide: String(item.pro_ide || ''),
+                        pro_nom: item.pro_nom || 'Desconocido',
+                        pro_tip: item.pro_tip || 'workspace',
+                        pro_pad: String(item.pro_pad || '0'),
+                        gpp_ide: Number(item.gpp_ide || 0),
+                        usu_ide: item.usu_ide,
+                        p_m_gen: item.p_m_gen,
+                        miembro_estado: item.miembro_estado,
+                        proyecto_estado: String(item.pro_est_ado ?? item.proyecto_estado ?? '0'),
+                        tree: item.tree || [],
+                        children: item.children || []
+                    };
+                });
+                setProyectos(mapped as any);
             }
         } catch {
             // silently ignore
@@ -172,21 +206,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
             const res = await skambaConseguirMiembros('', selectedGrupo.gru_ide);
             if (res.success && res.data) {
                 setMiembros(res.data);
-                // Cargar acceso de cada miembro a proyectos
-                const entries = await Promise.all(
-                    res.data.map(async (m): Promise<[number, Set<string>]> => {
-                        try {
-                            const r = await skambaConseguirProyectosGrupoUsuario('', selectedGrupo.gru_ide, m.usu_ide);
-                            if (r.success && r.data) {
-                                return [m.usu_ide, collectProIds(r.data)];
-                            }
-                        } catch {
-                            // silently ignore
-                        }
-                        return [m.usu_ide, new Set<string>()];
-                    })
-                );
-                setMemberAccess(new Map(entries));
+                // Evitamos llamar a skambaConseguirProyectosGrupoUsuario para
+                // cada miembro para no hacer demasiados requests OPTIONS al backend.
+                // Asumimos que los miembros del grupo tienen acceso a los proyectos del grupo.
+                // O si se requiere en el futuro, se debe usar un endpoint optimizado.
+                setMemberAccess(new Map());
             }
         } catch {
             // silently ignore
@@ -200,7 +224,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setCreatingGrupo(true);
         setMessage(null);
         try {
-            const res = await skambaCrearGrupo('', newGrupoName.trim(), usuIde);
+            const res = await skambaCrearGrupo('', newGrupoName.trim());
             if (res.success && res.gru_ide) {
                 setMessage({ text: `Grupo "${newGrupoName}" creado exitosamente.`, type: 'success' });
                 setNewGrupoName('');
@@ -230,7 +254,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                 await loadMiembros();
                 // Abrir modal para asignar workspaces al nuevo miembro
                 if (proyectos.length > 0) {
-                    setAssignSelected(new Set(proyectos.map(p => p.pro_ide)));
+                    setAssignSelected(new Set(proyectos.map(p => Number(p.pro_ide))));
                     setAssignModal({ type: 'projectsToMember', usu_ide: nuevoUsuIde, usu_nom: nuevoUsuNom });
                 } else {
                     setMessage({ text: 'Miembro agregado al grupo.', type: 'success' });
@@ -270,24 +294,13 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
             const res = await skambaAgregarGrupoProyecto('', selectedGrupo.gru_ide, proIde);
             if (res.success) {
                 const wsName = flattenAllItems(workspaces).find(item => String(item.pro_ide) === String(selectedProyecto))?.pro_nom ?? '';
-                const currentUserId = usuIde;
-
-                // El usuario logeado se asigna automáticamente
-                await skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, currentUserId, proIde).catch(() => null);
 
                 setSelectedProyecto('');
                 setShowAddProyecto(false);
                 await loadProyectosGrupo();
                 await loadProyectos();
 
-                // Modal solo para los otros miembros del grupo
-                const otherMembers = miembros.filter(m => m.usu_ide !== currentUserId);
-                if (otherMembers.length > 0) {
-                    setAssignSelected(new Set(otherMembers.map(m => m.usu_ide)));
-                    setAssignModal({ type: 'membersToProject', pro_ide: proIde, pro_nom: wsName });
-                } else {
-                    setMessage({ text: 'Elemento vinculado al grupo.', type: 'success' });
-                }
+                setMessage({ text: 'Proyecto vinculado al grupo.', type: 'success' });
             } else {
                 setMessage({ text: res.message || 'Error al agregar proyecto', type: 'error' });
             }
@@ -301,27 +314,16 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         if (!assignModal || !selectedGrupo) return;
         setAssigning(true);
         try {
-            if (assignModal.type === 'membersToProject') {
-                await Promise.all(
-                    [...assignSelected].map(uIde =>
-                        skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, uIde, assignModal.pro_ide).catch(() => null)
-                    )
-                );
-            } else {
-                await Promise.all(
-                    [...assignSelected].map(pIde =>
-                        skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, assignModal.usu_ide, pIde).catch(() => null)
-                    )
-                );
-            }
+            // Endpoint no disponible - funcionalidad deshabilitada
+            setAssigning(false);
+            setAssignModal(null);
+            setMessage({ text: 'Esta funcionalidad no está disponible temporalmente', type: 'info' });
+            return;
         } catch {
             // silently ignore
         }
         setAssigning(false);
         setAssignModal(null);
-        setMessage({ text: 'Accesos asignados correctamente.', type: 'success' });
-        await loadMiembros();
-        await loadProyectos();
     }
 
     async function handleRemoveProyecto(gppIde: number) {
@@ -345,19 +347,8 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
         setAssigningKey(key);
         setMessage(null);
         try {
-            const res = await skambaAgregarUsuarioProyectoMiembro('', selectedGrupo.gru_ide, uIde, proIde);
-            if (res.success) {
-                setMemberAccess(prev => {
-                    const next = new Map(prev);
-                    const current = new Set(next.get(usuIde) ?? []);
-                    current.add(String(proIde));
-                    next.set(usuIde, current);
-                    return next;
-                });
-                setMessage({ text: 'Usuario asignado al proyecto.', type: 'success' });
-            } else {
-                setMessage({ text: res.message || 'Error al asignar usuario', type: 'error' });
-            }
+            // Endpoint no disponible - funcionalidad deshabilitada
+            setMessage({ text: 'Esta funcionalidad no está disponible temporalmente', type: 'info' });
         } catch {
             setMessage({ text: 'Error al asignar usuario', type: 'error' });
         }
@@ -402,7 +393,8 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                 {message && (
                     <div className={`mx-6 mb-3 p-3 rounded-lg text-sm flex items-center justify-between ${message.type === 'success'
                         ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
-                        : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                        : message.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                            : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                         }`}>
                         <span>{message.text}</span>
                         <button onClick={() => setMessage(null)} className="ml-3 text-xs opacity-60 hover:opacity-100">✕</button>
@@ -588,7 +580,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                         Vincular elemento al grupo
                                     </p>
                                     <p className="text-xs text-zinc-400 mb-3">
-                                        Selecciona un workspace, space, folder o lista para vincular.
+                                        Selecciona un elemento (Workspace, Space, Folder o Lista) para vincular.
                                     </p>
                                     <div className="flex gap-2">
                                         <select
@@ -599,7 +591,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                             <option value="">Seleccionar elemento...</option>
                                             {availableItems.map(item => (
                                                 <option key={item.pro_ide} value={item.pro_ide}>
-                                                    {'\u00A0\u00A0'.repeat(item.depth)}{tipStyle(item.pro_tip).label}: {item.pro_nom}
+                                                    {'\u00A0\u00A0'.repeat(item.depth)}[{tipStyle(item.pro_tip).label}] {item.path}
                                                 </option>
                                             ))}
                                         </select>
@@ -626,32 +618,67 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                             ) : proyectos.length === 0 ? (
                                 <div className="text-center py-16 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl">
                                     <p className="text-sm text-zinc-500">No hay elementos vinculados a este grupo</p>
-                                    <p className="text-xs text-zinc-400 mt-1">Usa "Vincular elemento" para agregar workspaces, spaces, folders o listas</p>
+                                    <p className="text-xs text-zinc-400 mt-1">Usa "Vincular elemento" para agregar workspaces</p>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                                <div className="space-y-4">
                                     {proyectos.map(p => {
-                                        const assignedMembers = miembros.filter(m => {
-                                            const access = memberAccess.get(m.usu_ide) ?? new Set<string>();
-                                            return access.has(String(p.pro_ide));
-                                        });
-                                        const unassignedMembers = miembros.filter(m => {
-                                            const access = memberAccess.get(m.usu_ide) ?? new Set<string>();
-                                            return !access.has(String(p.pro_ide));
-                                        });
+                                        // Como evitamos hacer N peticiones al backend por cada miembro,
+                                        // asumimos que todos los miembros del grupo tienen acceso a los proyectos del grupo.
+                                        const assignedMembers = miembros;
+                                        const unassignedMembers: Miembro[] = [];
+
+                                        // Renderizar estructura interna si aplica (usando el nuevo formato tree de skambaConseguirProyectosGrupoUsuario)
+                                        const renderTreeContent = (item: any, depth: number = 0) => {
+                                            if (!item) return null;
+
+                                            return (
+                                                <div key={`${item.pro_ide}-${depth}`} className="space-y-1.5">
+                                                    {/* Elemento */}
+                                                    <div className={`flex items-center gap-2 p-2 rounded-lg ${depth > 0 ? 'ml-3' : ''}`}>
+                                                        <div className={`w-6 h-6 rounded text-xs font-bold flex items-center justify-center ${tipStyle(item.pro_tip).bg} ${tipStyle(item.pro_tip).text}`}>
+                                                            {item.pro_nom.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{item.pro_nom}</span>
+                                                        <span className={`ml-auto text-[9px] font-semibold px-1.5 py-0.5 rounded ${tipStyle(item.pro_tip).bg} ${tipStyle(item.pro_tip).text}`}>
+                                                            {tipStyle(item.pro_tip).label}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Contenido anidado */}
+                                                    {item.children && item.children.length > 0 && (
+                                                        <div className="space-y-1">
+                                                            {item.children.map((child: any) => renderTreeContent(child, depth + 1))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        };
 
                                         return (
                                             <div key={p.gpp_ide} className="p-4 bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col gap-3">
                                                 <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-3 min-w-0">
-                                                        <div className={`w-8 h-8 rounded-lg ${tipStyle(p.pro_tip).bg} flex items-center justify-center ${tipStyle(p.pro_tip).text} text-sm font-bold shrink-0`}>
-                                                            {p.pro_nom.charAt(0).toUpperCase()}
-                                                        </div>
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.pro_nom}</p>
+                                                    <div className={`w-8 h-8 rounded-lg ${tipStyle(p.pro_tip).bg} flex items-center justify-center ${tipStyle(p.pro_tip).text} text-sm font-bold`}>
+                                                        {p.pro_nom.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div className="flex-1 ml-3 min-w-0">
+                                                        <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.pro_nom}</p>
+                                                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                                                             <span className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded ${tipStyle(p.pro_tip).bg} ${tipStyle(p.pro_tip).text}`}>
                                                                 {tipStyle(p.pro_tip).label}
                                                             </span>
+                                                            {p.proyecto_estado === '1' && (
+                                                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                                                    Activo
+                                                                </span>
+                                                            )}
+                                                            {p.proyecto_estado !== '1' && (
+                                                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-zinc-100 dark:bg-zinc-700/30 text-zinc-600 dark:text-zinc-400">
+                                                                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400"></span>
+                                                                    Inactivo
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     <button
@@ -661,6 +688,18 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                                         Desvincular
                                                     </button>
                                                 </div>
+
+                                                {/* Estructura interna si existe */}
+                                                {(p as any).children && (p as any).children.length > 0 && (
+                                                    <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 max-h-48 overflow-y-auto">
+                                                        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                                                            Contenido
+                                                        </p>
+                                                        <div className="space-y-1">
+                                                            {(p as any).children.map((child: any) => renderTreeContent(child, 0))}
+                                                        </div>
+                                                    </div>
+                                                )}
 
                                                 {/* Acceso al workspace */}
                                                 <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3">
@@ -688,7 +727,7 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                                                 return (
                                                                     <button
                                                                         key={m.usu_ide}
-                                                                        onClick={() => handleAssignMemberToProject(m.usu_ide, p.pro_ide)}
+                                                                        onClick={() => handleAssignMemberToProject(m.usu_ide, Number(p.pro_ide))}
                                                                         disabled={assigningKey === key}
                                                                         className="px-2 py-0.5 text-[11px] font-medium border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 rounded-full hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors disabled:opacity-50"
                                                                         title={`Asignar a ${m.usu_nom} a "${p.pro_nom}"`}
@@ -756,10 +795,11 @@ export function GrupoView({ grupo }: { grupo?: Grupo }) {
                                     <label key={p.pro_ide} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer">
                                         <input
                                             type="checkbox"
-                                            checked={assignSelected.has(p.pro_ide)}
+                                            checked={assignSelected.has(Number(p.pro_ide))}
                                             onChange={() => setAssignSelected(prev => {
                                                 const next = new Set(prev);
-                                                next.has(p.pro_ide) ? next.delete(p.pro_ide) : next.add(p.pro_ide);
+                                                const numId = Number(p.pro_ide);
+                                                next.has(numId) ? next.delete(numId) : next.add(numId);
                                                 return next;
                                             })}
                                             className="w-4 h-4 accent-indigo-600 rounded"

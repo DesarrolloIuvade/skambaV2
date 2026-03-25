@@ -10,11 +10,10 @@ import type { SkambaResponseGetProyectos } from '../types/shared';
 export async function skambaCrearGrupo(
   _token: string,
   gru_nom: string,
-  usu_des: number,
 ): Promise<{ success: boolean; message: string; gru_ide: number }> {
   const response = await apiClient.post(
     'skambaCrearGrupo/',
-    toForm({ gru_nom, usu_des }),
+    toForm({ gru_nom }),
   );
   return response.data;
 }
@@ -98,16 +97,17 @@ export async function skambaConseguirMiembros(
   return response.data;
 }
 
-export async function skambaMiembrosProyecto(
-  _token: string,
-  pro_ide: number,
-): Promise<{ success: boolean; data: Miembro[]; message?: string }> {
-  const response = await apiClient.post(
-    'skambaMiembrosProyecto/',
-    toForm({ pro_ide }),
-  );
-  return response.data;
-}
+// Eliminamos esto
+// export async function skambaMiembrosProyecto(
+// _token: string,
+// pro_ide: number,
+// ): Promise<{ success: boolean; data: Miembro[]; message?: string }> {
+// const response = await apiClient.post(
+// 'skambaMiembrosProyecto/',
+// toForm({ pro_ide }),
+// );
+// return response.data;
+// }
 
 // ------------------------------
 // Grupo-Proyecto
@@ -138,7 +138,6 @@ export async function skambaEliminarGrupoProyecto(
 
 export async function skambaConseguirProyectosGrupo(
   _token: string,
-  usu_ide: number,
   gru_ide: number,
 ): Promise<{
   success: boolean;
@@ -146,7 +145,7 @@ export async function skambaConseguirProyectosGrupo(
 }> {
   const response = await apiClient.post(
     'skambaConseguirProyectosGrupo/',
-    toForm({ usu_ide, gru_ide }),
+    toForm({ gru_ide }),
   );
   return response.data;
 }
@@ -185,15 +184,12 @@ export async function skambaConseguirProyectosGrupoUsuario(
   return response.data;
 }
 
-export async function skambaAgregarUsuarioProyectoMiembro(
+export async function skambaConseguirProyectosGrupoUsuarioPorUsuario(
   _token: string,
-  gru_ide: number,
   usu_ide: number,
-  pro_ide: number,
-): Promise<{ success: boolean; message: string; p_m_ide: string }> {
-  const response = await apiClient.post(
-    'skambaAgregarUsuarioProyectoMiembro/',
-    toForm({ gru_ide, usu_ide, pro_ide }),
+): Promise<{ success: boolean; data: any[] }> {
+  const response = await apiClient.get(
+    `skambaConseguirProyectosGrupoUsuario/?usu_ide=${usu_ide}`,
   );
   return response.data;
 }
@@ -217,6 +213,7 @@ export async function skambaMostrarProyectosMiembro(
   const response = await apiClient.post(
     'skambaMostrarProyectosMiembro/',
     toForm({ usu_ide }),
+    { headers: { Authorization: _token } },
   );
   return response.data;
 }

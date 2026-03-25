@@ -10,7 +10,6 @@ import {
     skambaLogsTareas, type TareaLog,
 } from '../lib/api';
 import type { Miembro } from '../lib/types/grupo';
-import { getProjectMembers } from '../lib/getProjectMembers';
 import { QuillEditor } from './QuillEditor';
 
 interface TaskDetailModalProps {
@@ -18,6 +17,7 @@ interface TaskDetailModalProps {
     lista: Lista;
     onClose: () => void;
     onUpdate: () => void;
+    miembros?: Miembro[];
 }
 
 const priorityOptions = [
@@ -27,7 +27,7 @@ const priorityOptions = [
     { id: '3', label: 'Baja', bg: '#10b981' },
 ];
 
-export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailModalProps) {
+export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = [] }: TaskDetailModalProps) {
     const [nombre, setNombre] = useState(tarea.tar_nom ?? '');
     const [descripcion, setDescripcion] = useState(tarea.tar_des ?? '');
     const [estadoId, setEstadoId] = useState(String(tarea.tar_est ?? lista.estados[0]?.p_e_ide ?? ''));
@@ -42,7 +42,7 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailM
     const [showLogs, setShowLogs] = useState(false);
     const [logsLoading, setLogsLoading] = useState(false);
 
-    const [usuarios, setUsuarios] = useState<Miembro[]>([]);
+    const [usuarios, setUsuarios] = useState<Miembro[]>(miembros);
 
     const [comentarios, setComentarios] = useState<Comentario[]>([]);
     const [nuevoComentario, setNuevoComentario] = useState('');
@@ -68,22 +68,46 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate }: TaskDetailM
         const init = async () => {
             setTaskLoading(true);
             try {
-                const refreshed = await skambaVerTarea('', Number(tarea.tar_ide));
-                if (refreshed) {
+                const result = await skambaVerTarea('', Number(tarea.tar_ide));
+                if (result.success && result.data) {
+                    const refreshed = result.data;
                     setNombre(refreshed.tar_nom ?? '');
                     setDescripcion(refreshed.tar_des ?? '');
                     setEstadoId(String(refreshed.tar_est ?? ''));
                     setFecha(refreshed.tar_fch ?? '');
-                    setUsuDesId(refreshed.usu_des ? String(refreshed.usu_des) : '');
+
+                    let resolvedUsuDesId = refreshed.usu_des ? String(refreshed.usu_des) : '';
+                    if (!resolvedUsuDesId && refreshed.designado_nombre && result.miembros) {
+                        const member = result.miembros.find(m => m.usu_nom === refreshed.designado_nombre);
+                        if (member) resolvedUsuDesId = String(member.usu_ide);
+                    }
+                    if (!resolvedUsuDesId && refreshed.designado_nombre && !result.miembros) {
+                        // Respaldo por si no vinieron miembros en la API
+                        const member = usuarios.find(m => m.usu_nom === refreshed.designado_nombre);
+                        if (member) resolvedUsuDesId = String(member.usu_ide);
+                    }
+                    setUsuDesId(resolvedUsuDesId);
+
                     setPriId(refreshed.pri_ide ? String(refreshed.pri_ide) : '');
+
+                    if (result.miembros) {
+                        setUsuarios(result.miembros);
+                    } else if (miembros && miembros.length > 0) {
+                        setUsuarios(miembros);
+                    }
+                } else {
+                    if (miembros && miembros.length > 0) {
+                        setUsuarios(miembros);
+                    }
                 }
-            } catch { } finally {
+            } catch {
+                if (miembros && miembros.length > 0) {
+                    setUsuarios(miembros);
+                }
+            } finally {
                 setTaskLoading(false);
             }
 
-            getProjectMembers('', tarea.pro_ide)
-                .then(setUsuarios)
-                .catch(() => { });
             loadComentarios();
             loadArchivos();
         };

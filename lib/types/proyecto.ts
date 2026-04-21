@@ -11,6 +11,8 @@ export interface Lista {
   tareas: Tarea[];
   estados: EstadoProyecto[];
   miembros?: Miembro[];
+  tareas_pendientes?: number;
+  tareas_pendientes_total?: number;
 }
 
 export interface Folder {
@@ -21,6 +23,8 @@ export interface Folder {
   est_ado: string;
   pro_tip: 'folder';
   listas: Lista[];
+  tareas_pendientes?: number;
+  tareas_pendientes_total?: number;
 }
 
 export interface Space {
@@ -34,6 +38,8 @@ export interface Space {
     folders: Folder[];
     listas: Lista[];
   };
+  tareas_pendientes?: number;
+  tareas_pendientes_total?: number;
 }
 
 export interface Workspace {
@@ -44,6 +50,8 @@ export interface Workspace {
   est_ado: string;
   pro_tip: 'workspace';
   spaces: Space[];
+  tareas_pendientes?: number;
+  tareas_pendientes_total?: number;
 }
 
 export interface CrearProyecto {

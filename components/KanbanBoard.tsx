@@ -1,11 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Lista, Tarea, EstadoProyecto, skambaEditarTarea } from '../lib/api';
+import { useState } from 'react';
+import { Lista, Tarea, EstadoProyecto, skambaEditarTarea, skambaEliminarTarea } from '../lib/api';
 import { Miembro } from '../lib/api';
 // import { getProjectMembers } from '../lib/getProjectMembers';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
+import { ProjectStatesModal } from './ProjectStatesModal';
+import { Settings, Trash2 } from 'lucide-react';
+import { useAuthStore } from '../context/useAuthStore';
 
 interface KanbanBoardProps {
     lista: Lista;
@@ -38,15 +41,11 @@ const priorityColors: Record<string, string> = {
 export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProps) {
     const [selectedTarea, setSelectedTarea] = useState<Tarea | null>(null);
     const [createEstadoId, setCreateEstadoId] = useState<string | null>(null);
-    const [usuariosMap, setUsuariosMap] = useState<Record<string, string>>({});
-
-    useEffect(() => {
-        if (miembros && miembros.length > 0) {
-            const map: Record<string, string> = {};
-            miembros.forEach(m => { map[String(m.usu_ide)] = m.usu_nom; });
-            setUsuariosMap(map);
-        }
-    }, [miembros]);
+    const [showStatesModal, setShowStatesModal] = useState(false);
+    const { user } = useAuthStore();
+    const usuariosMap = Object.fromEntries(
+        miembros.map((m) => [String(m.usu_ide), m.usu_nom])
+    ) as Record<string, string>;
 
     const tareasPorEstado = (estado: EstadoProyecto): Tarea[] =>
         lista.tareas.filter((t) => t.tar_est === estado.p_e_ide);
@@ -66,10 +65,34 @@ export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProp
         onRefresh?.();
     }
 
+    async function handleDeleteTask(tarea: Tarea) {
+        const usuIde = user?.usu_ide;
+        if (!usuIde) return;
+        if (!window.confirm(`¿Eliminar la tarea "${tarea.tar_nom}"?`)) return;
+
+        try {
+            const res = await skambaEliminarTarea('', Number(tarea.tar_ide), Number(usuIde));
+            if (res.success) {
+                if (selectedTarea?.tar_ide === tarea.tar_ide) setSelectedTarea(null);
+                onRefresh?.();
+            }
+        } catch { }
+    }
+
     return (
         <>
             <div>
-                <h2 className="text-lg font-semibold text-zinc-900 dark:text-white mb-4">{lista.pro_nom}</h2>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">{lista.pro_nom}</h2>
+                    <button
+                        onClick={() => setShowStatesModal(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors"
+                        title="Configurar estados del proyecto"
+                    >
+                        <Settings className="w-3.5 h-3.5" />
+                        Estados
+                    </button>
+                </div>
                 <div className="flex gap-4 overflow-x-auto pb-4">
                     {lista.estados.map((estado) => {
                         const tareas = tareasPorEstado(estado);
@@ -77,7 +100,7 @@ export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProp
                         return (
                             <div
                                 key={estado.p_e_ide}
-                                className="flex flex-col gap-2 min-w-[14rem] w-56 shrink-0"
+                                className="flex flex-col gap-2 min-w-56 w-56 shrink-0"
                             >
                                 {/* Column header */}
                                 <div className="flex items-center gap-2 mb-1">
@@ -181,6 +204,20 @@ export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProp
                                                         </div>
                                                     )}
                                                 </div>
+                                                <div className="mt-2 flex justify-end">
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void handleDeleteTask(tarea);
+                                                        }}
+                                                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-red-600 dark:hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                                                        title="Eliminar tarea"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                        Eliminar
+                                                    </button>
+                                                </div>
                                             </button>
                                         );
                                     })}
@@ -224,6 +261,14 @@ export function KanbanBoard({ lista, onRefresh, miembros = [] }: KanbanBoardProp
                     onClose={() => setCreateEstadoId(null)}
                     onCreated={handleTaskCreated}
                     miembros={miembros}
+                />
+            )}
+
+            {showStatesModal && (
+                <ProjectStatesModal
+                    proId={lista.pro_ide}
+                    onClose={() => setShowStatesModal(false)}
+                    onUpdate={onRefresh}
                 />
             )}
         </>

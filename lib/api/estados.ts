@@ -6,6 +6,35 @@ import type { Estado, EstadoProyecto } from '../types/tarea';
 // Estados (Refactored to use apiClient)
 // ------------------------------
 
+const estadosProyectoInFlight = new Map<number, Promise<EstadoProyecto[]>>();
+const estadosProyectoRecentCache = new Map<
+  number,
+  { ts: number; value: EstadoProyecto[] }
+>();
+const ESTADOS_PROYECTO_CACHE_TTL_MS = 300;
+let estadosProyectoQueue: Promise<void> = Promise.resolve();
+
+function enqueueEstadosProyecto<T>(runner: () => Promise<T>) {
+  const scheduled = estadosProyectoQueue.then(runner, runner);
+  estadosProyectoQueue = scheduled.then(
+    () => undefined,
+    () => undefined,
+  );
+  return scheduled;
+}
+
+function normalizeEstadosProyectoResponse(payload: unknown): EstadoProyecto[] {
+  if (Array.isArray(payload)) return payload as EstadoProyecto[];
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    Array.isArray((payload as { data?: unknown }).data)
+  ) {
+    return (payload as { data: EstadoProyecto[] }).data ?? [];
+  }
+  return [];
+}
+
 export async function skambaCrearEstado(
   _token: string,
   est_nom: string,
@@ -53,8 +82,29 @@ export async function skambaConseguirEstadosProyecto(
   _token: string,
   pro_ide: number,
 ): Promise<EstadoProyecto[]> {
-  const response = await apiClient.post('skambaConseguirEstadosProyecto/', toForm({ pro_ide }));
-  return response.data;
+  const now = Date.now();
+  const cached = estadosProyectoRecentCache.get(pro_ide);
+  if (cached && now - cached.ts < ESTADOS_PROYECTO_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  const existing = estadosProyectoInFlight.get(pro_ide);
+  if (existing) return existing;
+
+  const request = enqueueEstadosProyecto(async () => {
+    const response = await apiClient.post(
+      'skambaConseguirEstadosProyecto/',
+      toForm({ pro_ide }),
+    );
+    const value = normalizeEstadosProyectoResponse(response.data);
+    estadosProyectoRecentCache.set(pro_ide, { ts: Date.now(), value });
+    return value;
+  }).finally(() => {
+    estadosProyectoInFlight.delete(pro_ide);
+  });
+
+  estadosProyectoInFlight.set(pro_ide, request);
+  return request;
 }
 
 export async function skambaAgregarEstadoProyecto(

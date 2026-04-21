@@ -2,10 +2,10 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { deleteCookie, getCookie, setCookie } from 'cookies-next';
 import {
     skambaConseguirProyectos,
     skambaConseguirProyectosGrupoUsuarioPorUsuario,
-    skambaConseguirProyecto,
     skambaCrearProyecto,
     skambaEditarProyecto,
     skambaEliminarProyecto,
@@ -17,6 +17,7 @@ import {
 } from '../lib/api';
 import { useAuth } from '../hooks/useAuth';
 import { useAuthStore } from './useAuthStore';
+import { TASKS_UPDATED_EVENT, type TasksUpdatedDetail } from '../lib/task-events';
 
 export type SelectedView =
     | { type: 'workspace'; workspace: Workspace }
@@ -103,7 +104,16 @@ function normalizeWorkspace(raw: Workspace): Workspace {
     };
 }
 
+function readPendingCount(value: unknown): number | null {
+    if (Array.isArray(value)) return value.length;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
 function toListaFromNode(node: any, parentId: string): Lista {
+    const pending = readPendingCount(node?.tareas_pendientes);
+    const totalPending = readPendingCount(node?.tareas_pendientes_total);
+
     return {
         pro_ide: String(node?.pro_ide ?? ''),
         pro_nom: String(node?.pro_nom ?? 'Lista'),
@@ -114,6 +124,8 @@ function toListaFromNode(node: any, parentId: string): Lista {
         tareas: Array.isArray(node?.tareas) ? node.tareas : [],
         estados: Array.isArray(node?.estados) ? node.estados : [],
         miembros: Array.isArray(node?.miembros) ? node.miembros : [],
+        tareas_pendientes: pending ?? 0,
+        tareas_pendientes_total: totalPending ?? pending ?? 0,
     };
 }
 
@@ -138,6 +150,13 @@ function toFolderFromNode(node: any, parentId: string): Folder {
         }
     }
 
+    const pending = readPendingCount(node?.tareas_pendientes);
+    const totalPending = readPendingCount(node?.tareas_pendientes_total);
+    const fallbackTotal = listas.reduce(
+        (sum, lista) => sum + Number(lista.tareas_pendientes_total ?? lista.tareas_pendientes ?? 0),
+        0,
+    );
+
     return {
         pro_ide: String(node?.pro_ide ?? ''),
         pro_nom: String(node?.pro_nom ?? 'Folder'),
@@ -146,6 +165,8 @@ function toFolderFromNode(node: any, parentId: string): Folder {
         est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
         pro_tip: 'folder',
         listas,
+        tareas_pendientes: pending ?? fallbackTotal,
+        tareas_pendientes_total: totalPending ?? pending ?? fallbackTotal,
     };
 }
 
@@ -164,6 +185,18 @@ function toSpaceFromNode(node: any, parentId: string): Space {
         }
     }
 
+    const pending = readPendingCount(node?.tareas_pendientes);
+    const totalPending = readPendingCount(node?.tareas_pendientes_total);
+    const fallbackTotal =
+        folders.reduce(
+            (sum, folder) => sum + Number(folder.tareas_pendientes_total ?? folder.tareas_pendientes ?? 0),
+            0,
+        ) +
+        listas.reduce(
+            (sum, lista) => sum + Number(lista.tareas_pendientes_total ?? lista.tareas_pendientes ?? 0),
+            0,
+        );
+
     return {
         pro_ide: String(node?.pro_ide ?? ''),
         pro_nom: String(node?.pro_nom ?? 'Space'),
@@ -172,6 +205,8 @@ function toSpaceFromNode(node: any, parentId: string): Space {
         est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
         pro_tip: 'space',
         contenido: { folders, listas },
+        tareas_pendientes: pending ?? fallbackTotal,
+        tareas_pendientes_total: totalPending ?? pending ?? fallbackTotal,
     };
 }
 
@@ -184,12 +219,16 @@ function createSyntheticSpaceForWorkspace(ws: Workspace): Space {
         est_ado: ws.est_ado,
         pro_tip: 'space',
         contenido: { folders: [], listas: [] },
+        tareas_pendientes: 0,
+        tareas_pendientes_total: 0,
     };
 }
 
 function toWorkspaceFromTreeRoot(node: any): Workspace {
     const tip = String(node?.pro_tip ?? '').toLowerCase();
     const proIde = String(node?.pro_ide ?? '');
+    const pending = readPendingCount(node?.tareas_pendientes);
+    const totalPending = readPendingCount(node?.tareas_pendientes_total);
     const ws = {
         pro_ide: proIde,
         pro_nom: String(node?.pro_nom ?? 'Workspace'),
@@ -198,6 +237,8 @@ function toWorkspaceFromTreeRoot(node: any): Workspace {
         est_ado: String(node?.proyecto_estado ?? node?.pro_est_ado ?? node?.est_ado ?? '1'),
         pro_tip: 'workspace',
         spaces: [],
+        tareas_pendientes: pending ?? 0,
+        tareas_pendientes_total: totalPending ?? pending ?? 0,
         pro_tip_original: (tip === 'workspace' || tip === 'space' || tip === 'folder' || tip === 'list') ? tip : 'workspace',
     } as Workspace & { pro_tip_original: 'workspace' | 'space' | 'folder' | 'list' };
 
@@ -217,145 +258,53 @@ function toWorkspaceFromTreeRoot(node: any): Workspace {
             if (childTip === 'folder') synthetic.contenido.folders.push(toFolderFromNode(child, synthetic.pro_ide));
             if (childTip === 'list') synthetic.contenido.listas.push(toListaFromNode(child, synthetic.pro_ide));
         }
+        if (!totalPending && !pending) {
+            ws.tareas_pendientes_total = ws.spaces.reduce(
+                (sum, space) => sum + Number(space.tareas_pendientes_total ?? space.tareas_pendientes ?? 0),
+                0,
+            );
+            ws.tareas_pendientes = ws.tareas_pendientes_total;
+        }
         return ws;
     }
 
     if (tip === 'space') {
         ws.spaces.push(toSpaceFromNode(node, ws.pro_ide));
+        if (!totalPending && !pending) {
+            ws.tareas_pendientes_total = ws.spaces.reduce(
+                (sum, space) => sum + Number(space.tareas_pendientes_total ?? space.tareas_pendientes ?? 0),
+                0,
+            );
+            ws.tareas_pendientes = ws.tareas_pendientes_total;
+        }
         return ws;
     }
 
     const synthetic = createSyntheticSpaceForWorkspace(ws);
     if (tip === 'folder') synthetic.contenido.folders.push(toFolderFromNode(node, synthetic.pro_ide));
     if (tip === 'list') synthetic.contenido.listas.push(toListaFromNode(node, synthetic.pro_ide));
+    synthetic.tareas_pendientes_total =
+        synthetic.contenido.folders.reduce(
+            (sum, folder) => sum + Number(folder.tareas_pendientes_total ?? folder.tareas_pendientes ?? 0),
+            0,
+        ) +
+        synthetic.contenido.listas.reduce(
+            (sum, lista) => sum + Number(lista.tareas_pendientes_total ?? lista.tareas_pendientes ?? 0),
+            0,
+        );
+    synthetic.tareas_pendientes = synthetic.tareas_pendientes_total;
     ws.spaces.push(synthetic);
+    if (!totalPending && !pending) {
+        ws.tareas_pendientes_total = synthetic.tareas_pendientes_total;
+        ws.tareas_pendientes = synthetic.tareas_pendientes;
+    }
     return ws;
 }
 
-function buildGroupWorkspacesFromFlat(rawItems: any[]): Workspace[] {
-    const dedupByProId = new Map<string, any>();
-    for (const item of rawItems) {
-        const id = String(item?.pro_ide ?? '');
-        if (!id) continue;
-        if (!dedupByProId.has(id)) dedupByProId.set(id, item);
-    }
-
-    const wsById = new Map<string, Workspace>();
-    const spaceById = new Map<string, Space>();
-    const folderById = new Map<string, Folder>();
-    const listById = new Map<string, Lista>();
-
-    for (const item of dedupByProId.values()) {
-        const id = String(item.pro_ide);
-        const parentId = String(item.pro_pad ?? '0');
-        const estado = String(item.proyecto_estado ?? item.pro_est_ado ?? '1');
-        const usuIde = String(item.usu_ide ?? '0');
-        const tip = String(item.pro_tip ?? '').toLowerCase();
-
-        if (tip === 'workspace') {
-            wsById.set(id, {
-                pro_ide: id,
-                pro_nom: String(item.pro_nom ?? 'Workspace'),
-                usu_ide: usuIde,
-                pro_pad: parentId,
-                est_ado: estado,
-                pro_tip: 'workspace',
-                spaces: [],
-            });
-        }
-
-        if (tip === 'space') {
-            spaceById.set(id, {
-                pro_ide: id,
-                pro_nom: String(item.pro_nom ?? 'Space'),
-                usu_ide: usuIde,
-                pro_pad: parentId,
-                est_ado: estado,
-                pro_tip: 'space',
-                contenido: { folders: [], listas: [] },
-            });
-        }
-
-        if (tip === 'folder') {
-            folderById.set(id, {
-                pro_ide: id,
-                pro_nom: String(item.pro_nom ?? 'Folder'),
-                usu_ide: usuIde,
-                pro_pad: parentId,
-                est_ado: estado,
-                pro_tip: 'folder',
-                listas: [],
-            });
-        }
-
-        if (tip === 'list') {
-            listById.set(id, {
-                pro_ide: id,
-                pro_nom: String(item.pro_nom ?? 'Lista'),
-                usu_ide: usuIde,
-                pro_pad: parentId,
-                est_ado: estado,
-                pro_tip: 'list',
-                tareas: [],
-                estados: [],
-                miembros: [],
-            });
-        }
-    }
-
-    for (const space of spaceById.values()) {
-        const parentWs = wsById.get(space.pro_pad);
-        if (parentWs && !parentWs.spaces.some((s) => s.pro_ide === space.pro_ide)) {
-            parentWs.spaces.push(space);
-        }
-    }
-
-    for (const folder of folderById.values()) {
-        const parentSpace = spaceById.get(folder.pro_pad);
-        if (parentSpace && !parentSpace.contenido.folders.some((f) => f.pro_ide === folder.pro_ide)) {
-            parentSpace.contenido.folders.push(folder);
-        }
-    }
-
-    for (const lista of listById.values()) {
-        const parentFolder = folderById.get(lista.pro_pad);
-        if (parentFolder) {
-            if (!parentFolder.listas.some((l) => l.pro_ide === lista.pro_ide)) {
-                parentFolder.listas.push(lista);
-            }
-            continue;
-        }
-
-        const parentSpace = spaceById.get(lista.pro_pad);
-        if (parentSpace && !parentSpace.contenido.listas.some((l) => l.pro_ide === lista.pro_ide)) {
-            parentSpace.contenido.listas.push(lista);
-        }
-    }
-
-    const sortByName = <T extends { pro_nom: string }>(arr: T[]) => {
-        arr.sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
-    };
-
-    for (const ws of wsById.values()) {
-        sortByName(ws.spaces);
-        for (const sp of ws.spaces) {
-            sortByName(sp.contenido.folders);
-            sortByName(sp.contenido.listas);
-            for (const fo of sp.contenido.folders) sortByName(fo.listas);
-        }
-    }
-
-    return Array.from(wsById.values()).sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
-}
 
 function buildGroupWorkspacesFromResponse(rawItems: any[]): Workspace[] {
     const items = Array.isArray(rawItems) ? rawItems : [];
     if (items.length === 0) return [];
-
-    const hasTreeResponse = items.some((item) => Array.isArray(item?.children));
-    if (!hasTreeResponse) {
-        return buildGroupWorkspacesFromFlat(items).map(normalizeWorkspace);
-    }
 
     const dedupRoots = new Map<string, any>();
     for (const root of items) {
@@ -367,6 +316,127 @@ function buildGroupWorkspacesFromResponse(rawItems: any[]): Workspace[] {
     const workspaces = Array.from(dedupRoots.values()).map((root) => normalizeWorkspace(toWorkspaceFromTreeRoot(root)));
     return workspaces.sort((a, b) => a.pro_nom.localeCompare(b.pro_nom, 'es', { sensitivity: 'base' }));
 }
+
+function findWorkspaceForSpace(workspaces: Workspace[], spaceId: string): Workspace | null {
+    for (const workspace of workspaces) {
+        if (workspace.spaces.some((space) => String(space.pro_ide) === String(spaceId))) {
+            return workspace;
+        }
+    }
+    return null;
+}
+
+function findWorkspaceForFolder(workspaces: Workspace[], folderId: string): Workspace | null {
+    for (const workspace of workspaces) {
+        if (workspace.spaces.some((space) =>
+            (space.contenido?.folders ?? []).some((folder) => String(folder.pro_ide) === String(folderId))
+        )) {
+            return workspace;
+        }
+    }
+    return null;
+}
+
+function findWorkspaceForList(workspaces: Workspace[], listId: string): Workspace | null {
+    for (const workspace of workspaces) {
+        for (const space of workspace.spaces) {
+            if ((space.contenido?.listas ?? []).some((lista) => String(lista.pro_ide) === String(listId))) {
+                return workspace;
+            }
+            if ((space.contenido?.folders ?? []).some((folder) =>
+                (folder.listas ?? []).some((lista) => String(lista.pro_ide) === String(listId))
+            )) {
+                return workspace;
+            }
+        }
+    }
+    return null;
+}
+
+function updatePendingCountInListNode(lista: Lista, listId: string, pendingCount: number): Lista {
+    if (String(lista.pro_ide) !== String(listId)) return lista;
+
+    return {
+        ...lista,
+        tareas_pendientes: pendingCount,
+        tareas_pendientes_total: pendingCount,
+    };
+}
+
+function updatePendingCountInFolderNode(folder: Folder, listId: string, pendingCount: number): Folder {
+    let changed = false;
+    const listas = (folder.listas ?? []).map((lista) => {
+        const updated = updatePendingCountInListNode(lista, listId, pendingCount);
+        if (updated !== lista) changed = true;
+        return updated;
+    });
+
+    if (!changed) return folder;
+
+    return {
+        ...folder,
+        listas,
+    };
+}
+
+function updatePendingCountInSpaceNode(space: Space, listId: string, pendingCount: number): Space {
+    let changed = false;
+    const directLists = (space.contenido?.listas ?? []).map((lista) => {
+        const updated = updatePendingCountInListNode(lista, listId, pendingCount);
+        if (updated !== lista) changed = true;
+        return updated;
+    });
+    const folders = (space.contenido?.folders ?? []).map((folder) => {
+        const updated = updatePendingCountInFolderNode(folder, listId, pendingCount);
+        if (updated !== folder) changed = true;
+        return updated;
+    });
+
+    if (!changed) return space;
+
+    return {
+        ...space,
+        contenido: {
+            folders,
+            listas: directLists,
+        },
+    };
+}
+
+function updatePendingCountInWorkspaceNode(workspace: Workspace, listId: string, pendingCount: number): Workspace {
+    let changed = false;
+    const spaces = (workspace.spaces ?? []).map((space) => {
+        const updated = updatePendingCountInSpaceNode(space, listId, pendingCount);
+        if (updated !== space) changed = true;
+        return updated;
+    });
+
+    if (!changed) return workspace;
+
+    return {
+        ...workspace,
+        spaces,
+    };
+}
+
+function updatePendingCountInWorkspaceCollection(
+    workspaces: Workspace[],
+    listId: string,
+    pendingCount: number,
+): Workspace[] {
+    let changed = false;
+    const next = workspaces.map((workspace) => {
+        const updated = updatePendingCountInWorkspaceNode(workspace, listId, pendingCount);
+        if (updated !== workspace) changed = true;
+        return updated;
+    });
+
+    return changed ? next : workspaces;
+}
+
+const LAST_VIEW_PRO_IDE_COOKIE = 'last_view_pro_ide';
+const WORKSPACES_CACHE_KEY = 'sk_workspaces_cache';
+const GROUP_WORKSPACES_CACHE_KEY = 'sk_group_workspaces_cache';
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
     const router = useRouter();
@@ -389,8 +459,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const [wsLoading, setWsLoading] = useState(false);
     const [wsError, setWsError] = useState('');
     const [miembros, setMiembros] = useState<any[]>([]);
-    const { user: storeUser, token } = useAuthStore();
+    const { user: storeUser, token, isHydrated } = useAuthStore();
 
+    // Track if we've already loaded data for the current session
+    const hasLoadedRef = React.useRef(false);
+    const lastTokenRef = React.useRef<string | null>(null);
     // Persist activeWorkspaceId automatically whenever it changes
     useEffect(() => {
         if (activeWorkspaceId) {
@@ -398,7 +471,26 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
     }, [activeWorkspaceId]);
 
+    // Save expand state whenever it changes
     useEffect(() => {
+        localStorage.setItem('sk_open_workspaces', JSON.stringify(Array.from(openWorkspaces)));
+    }, [openWorkspaces]);
+
+    useEffect(() => {
+        localStorage.setItem('sk_open_spaces', JSON.stringify(Array.from(openSpaces)));
+    }, [openSpaces]);
+
+    useEffect(() => {
+        localStorage.setItem('sk_open_folders', JSON.stringify(Array.from(openFolders)));
+    }, [openFolders]);
+
+    useEffect(() => {
+        // Wait for store to hydrate before proceeding
+        if (!isHydrated) {
+            setLoading(true);
+            return;
+        }
+
         if (!token) {
             setLoading(false);
             return;
@@ -411,113 +503,241 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
             });
         }
 
+        // Check if token changed (new login) or this is first load
+        const isNewLogin = lastTokenRef.current !== null && lastTokenRef.current !== token;
+        lastTokenRef.current = token;
+
+        // If data already loaded in this session and same token, load from cache
+        if (hasLoadedRef.current && !isNewLogin) {
+            loadDataFromCache();
+            setLoading(false);
+            return;
+        }
+
+        // New login or first load - fetch from API
+        hasLoadedRef.current = true;
         loadProyectosInternal(token).finally(() => setLoading(false));
-    }, [token, storeUser]);
+    }, [token, storeUser, isHydrated]);
+
+    useEffect(() => {
+        function handleTasksUpdated(event: Event) {
+            const customEvent = event as CustomEvent<TasksUpdatedDetail>;
+            const proIde = String(customEvent.detail?.proIde ?? '');
+            const pendingCount = customEvent.detail?.pendingCount;
+
+            if (!proIde || typeof pendingCount !== 'number') return;
+
+            setWorkspaces((prev) => updatePendingCountInWorkspaceCollection(prev, proIde, pendingCount));
+            setGroupWorkspaces((prev) => updatePendingCountInWorkspaceCollection(prev, proIde, pendingCount));
+            setSelectedLista((prev) => (
+                prev && String(prev.pro_ide) === proIde
+                    ? {
+                        ...prev,
+                        tareas_pendientes: pendingCount,
+                        tareas_pendientes_total: pendingCount,
+                    }
+                    : prev
+            ));
+            setSelectedView((prev) => (
+                prev?.type === 'list' && String(prev.lista.pro_ide) === proIde
+                    ? {
+                        type: 'list',
+                        lista: {
+                            ...prev.lista,
+                            tareas_pendientes: pendingCount,
+                            tareas_pendientes_total: pendingCount,
+                        },
+                    }
+                    : prev
+            ));
+        }
+
+        window.addEventListener(TASKS_UPDATED_EVENT, handleTasksUpdated as EventListener);
+        return () => {
+            window.removeEventListener(TASKS_UPDATED_EVENT, handleTasksUpdated as EventListener);
+        };
+    }, []);
 
     async function loadProyectosInternal(tk: string) {
         const usu_ide = storeUser?.usu_ide ?? 0;
-        // Proceed even if usu_ide is missing, as the main call only needs the token
 
         setLoadError('');
+
         try {
             const [res, groupRes] = await Promise.all([
                 skambaConseguirProyectos(tk),
-                // Reemplaza al endpoint anterior que pintaba workspaces de grupo.
-                skambaConseguirProyectosGrupoUsuarioPorUsuario('', usu_ide).catch(() => ({ success: false, data: [] as any[] })),
+                skambaConseguirProyectosGrupoUsuarioPorUsuario('', usu_ide).catch(() => ({
+                    success: false,
+                    data: [] as any[],
+                })),
             ]);
-
-            let normalizedGroup: Workspace[] = [];
-            if (groupRes.success && groupRes.data) {
-                const groupItems = Array.isArray(groupRes.data) ? groupRes.data : [];
-                normalizedGroup = buildGroupWorkspacesFromResponse(groupItems);
-            }
-            setGroupWorkspaces(normalizedGroup);
 
             let normalized: Workspace[] = [];
             if (res.success && res.data) {
                 normalized = res.data.map(normalizeWorkspace);
-                setWorkspaces(normalized);
             }
+            setWorkspaces(normalized);
+
+            let normalizedGroup: Workspace[] = [];
+            if (groupRes.success && groupRes.data) {
+                normalizedGroup = buildGroupWorkspacesFromResponse(groupRes.data);
+            }
+            setGroupWorkspaces(normalizedGroup);
+
+            localStorage.setItem(WORKSPACES_CACHE_KEY, JSON.stringify(normalized));
+            localStorage.setItem(GROUP_WORKSPACES_CACHE_KEY, JSON.stringify(normalizedGroup));
 
             const allWorkspaces = [...normalized, ...normalizedGroup];
             const allSpaces = allWorkspaces.flatMap((w) => collectSpaces(w));
             const allFolders = allWorkspaces.flatMap((w) => collectFolders(w));
             const allListas = allWorkspaces.flatMap((w) => collectListas(w));
 
-            // Set default active workspace if none selected or current is invalid
+            let nextActiveWorkspaceId: string | null = null;
+
+            if (selectedView?.type === 'workspace') {
+                nextActiveWorkspaceId = String(selectedView.workspace.pro_ide);
+            }
+            if (selectedView?.type === 'space') {
+                nextActiveWorkspaceId = findWorkspaceForSpace(allWorkspaces, String(selectedView.space.pro_ide))?.pro_ide ?? null;
+            }
+            if (selectedView?.type === 'folder') {
+                nextActiveWorkspaceId = findWorkspaceForFolder(allWorkspaces, String(selectedView.folder.pro_ide))?.pro_ide ?? null;
+            }
+            if (selectedView?.type === 'list') {
+                nextActiveWorkspaceId = findWorkspaceForList(allWorkspaces, String(selectedView.lista.pro_ide))?.pro_ide ?? null;
+            }
+
+            if (!nextActiveWorkspaceId) {
+                const cookieListId = String(getCookie(LAST_VIEW_PRO_IDE_COOKIE) ?? '');
+                if (cookieListId) {
+                    nextActiveWorkspaceId = findWorkspaceForList(allWorkspaces, cookieListId)?.pro_ide ?? null;
+                }
+            }
+
+            if (!nextActiveWorkspaceId) {
+                try {
+                    const saved = localStorage.getItem('sk_selected_view');
+                    if (saved) {
+                        const { type, id } = JSON.parse(saved) as { type: string; id: string };
+                        if (type === 'workspace') nextActiveWorkspaceId = String(id);
+                        if (type === 'space') nextActiveWorkspaceId = findWorkspaceForSpace(allWorkspaces, String(id))?.pro_ide ?? null;
+                        if (type === 'folder') nextActiveWorkspaceId = findWorkspaceForFolder(allWorkspaces, String(id))?.pro_ide ?? null;
+                        if (type === 'list') nextActiveWorkspaceId = findWorkspaceForList(allWorkspaces, String(id))?.pro_ide ?? null;
+                    }
+                } catch { }
+            }
+
             if (allWorkspaces.length > 0) {
                 setActiveWorkspaceId((prev) => {
-                    const inPersonal = normalized.find((w) => w.pro_ide === prev);
-                    if (inPersonal) return prev;
-                    const inGroup = normalizedGroup.find((w) => w.pro_ide === prev);
-                    if (inGroup) return prev;
+                    if (nextActiveWorkspaceId) {
+                        const selectedWorkspace = allWorkspaces.find((w) => String(w.pro_ide) === String(nextActiveWorkspaceId));
+                        if (selectedWorkspace) return String(selectedWorkspace.pro_ide);
+                    }
+
+                    const exists = allWorkspaces.find((w) => String(w.pro_ide) === String(prev));
+                    if (exists) return String(exists.pro_ide);
 
                     const savedActiveWs = localStorage.getItem('sk_active_workspace');
                     if (savedActiveWs) {
-                        const inAll = allWorkspaces.find((w) => String(w.pro_ide) === String(savedActiveWs));
-                        if (inAll) return inAll.pro_ide;
+                        const saved = allWorkspaces.find((w) => String(w.pro_ide) === String(savedActiveWs));
+                        if (saved) return String(saved.pro_ide);
                     }
-                    return allWorkspaces[0].pro_ide;
+
+                    return String(allWorkspaces[0].pro_ide);
                 });
             }
 
-            // Sync selectedView and selectedLista
             setSelectedView((prev) => {
                 if (prev !== null) {
                     if (prev.type === 'list') {
-                        const fresh = allListas.find((l) => l.pro_ide === prev.lista.pro_ide);
+                        const fresh = allListas.find((l) => String(l.pro_ide) === String(prev.lista.pro_ide));
                         return fresh ? { type: 'list', lista: fresh } : prev;
                     }
                     if (prev.type === 'folder') {
-                        const fresh = allFolders.find((f) => f.pro_ide === prev.folder.pro_ide);
+                        const fresh = allFolders.find((f) => String(f.pro_ide) === String(prev.folder.pro_ide));
                         return fresh ? { type: 'folder', folder: fresh } : prev;
                     }
                     if (prev.type === 'workspace') {
-                        const fresh = allWorkspaces.find((w) => w.pro_ide === prev.workspace.pro_ide);
+                        const fresh = allWorkspaces.find((w) => String(w.pro_ide) === String(prev.workspace.pro_ide));
                         return fresh ? { type: 'workspace', workspace: fresh } : prev;
                     }
                     if (prev.type === 'space') {
-                        const fresh = allSpaces.find((s) => s.pro_ide === prev.space.pro_ide);
+                        const fresh = allSpaces.find((s) => String(s.pro_ide) === String(prev.space.pro_ide));
                         return fresh ? { type: 'space', space: fresh } : prev;
                     }
                     return prev;
                 }
 
                 try {
+                    const cookieListId = String(getCookie(LAST_VIEW_PRO_IDE_COOKIE) ?? '');
+                    if (cookieListId) {
+                        const lista = allListas.find((l) => String(l.pro_ide) === cookieListId);
+                        if (lista) {
+                            const workspace = findWorkspaceForList(allWorkspaces, String(lista.pro_ide));
+                            if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                            return { type: 'list', lista };
+                        }
+                    }
+
                     const saved = localStorage.getItem('sk_selected_view');
                     if (saved) {
                         const { type, id } = JSON.parse(saved) as { type: string; id: string };
+
                         if (type === 'list') {
                             const lista = allListas.find((l) => String(l.pro_ide) === String(id));
-                            if (lista) return { type: 'list', lista };
+                            if (lista) {
+                                const workspace = findWorkspaceForList(allWorkspaces, String(lista.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                return { type: 'list', lista };
+                            }
                         }
                         if (type === 'folder') {
                             const folder = allFolders.find((f) => String(f.pro_ide) === String(id));
-                            if (folder) return { type: 'folder', folder };
+                            if (folder) {
+                                const workspace = findWorkspaceForFolder(allWorkspaces, String(folder.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                return { type: 'folder', folder };
+                            }
                         }
                         if (type === 'space') {
                             const space = allSpaces.find((s) => String(s.pro_ide) === String(id));
-                            if (space) return { type: 'space', space };
+                            if (space) {
+                                const workspace = findWorkspaceForSpace(allWorkspaces, String(space.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                return { type: 'space', space };
+                            }
                         }
                         if (type === 'workspace') {
                             const ws = allWorkspaces.find((w) => String(w.pro_ide) === String(id));
-                            if (ws) return { type: 'workspace', workspace: ws };
+                            if (ws) {
+                                setActiveWorkspaceId(String(ws.pro_ide));
+                                return { type: 'workspace', workspace: ws };
+                            }
                         }
                     }
-                } catch { /* ignore */ }
+                } catch { }
+
                 return prev;
             });
 
             setSelectedLista((prev) => {
                 if (prev !== null) {
-                    const fresh = allListas.find((l) => l.pro_ide === prev.pro_ide);
+                    const fresh = allListas.find((l) => String(l.pro_ide) === String(prev.pro_ide));
                     return fresh ?? prev;
                 }
+
                 const saved = localStorage.getItem('sk_selected_view');
+                const cookieListId = String(getCookie(LAST_VIEW_PRO_IDE_COOKIE) ?? '');
+                if (cookieListId) {
+                    return allListas.find((l) => String(l.pro_ide) === cookieListId) ?? prev;
+                }
                 if (saved) {
                     const { type, id } = JSON.parse(saved);
-                    if (type === 'list') return allListas.find((l) => String(l.pro_ide) === String(id)) ?? null;
+                    if (type === 'list') {
+                        return allListas.find((l) => String(l.pro_ide) === String(id)) ?? null;
+                    }
                 }
+
                 return prev;
             });
 
@@ -531,6 +751,121 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
     }
 
+    function loadDataFromCache() {
+        try {
+            const cachedWorkspaces = localStorage.getItem(WORKSPACES_CACHE_KEY);
+            const cachedGroupWs = localStorage.getItem(GROUP_WORKSPACES_CACHE_KEY);
+            const personalData = cachedWorkspaces ? JSON.parse(cachedWorkspaces) as Workspace[] : [];
+            const groupData = cachedGroupWs ? JSON.parse(cachedGroupWs) as Workspace[] : [];
+            const allWorkspaces = [...personalData, ...groupData];
+            if (allWorkspaces.length > 0) {
+                setWorkspaces(personalData);
+                setGroupWorkspaces(groupData);
+
+                const cachedOpenWs = localStorage.getItem('sk_open_workspaces');
+                const cachedOpenSpaces = localStorage.getItem('sk_open_spaces');
+                const cachedOpenFolders = localStorage.getItem('sk_open_folders');
+
+                if (cachedOpenWs) {
+                    setOpenWorkspaces(new Set(JSON.parse(cachedOpenWs)));
+                } else {
+                    setOpenWorkspaces(new Set(allWorkspaces.map((w) => w.pro_ide)));
+                }
+
+                if (cachedOpenSpaces) {
+                    setOpenSpaces(new Set(JSON.parse(cachedOpenSpaces)));
+                } else {
+                    const allSpaces = allWorkspaces.flatMap((w) => collectSpaces(w));
+                    setOpenSpaces(new Set(allSpaces.map((s) => s.pro_ide)));
+                }
+
+                if (cachedOpenFolders) {
+                    setOpenFolders(new Set(JSON.parse(cachedOpenFolders)));
+                } else {
+                    const allFolders = allWorkspaces.flatMap((w) => collectFolders(w));
+                    setOpenFolders(new Set(allFolders.map((f) => f.pro_ide)));
+                }
+
+                const savedActiveWs = localStorage.getItem('sk_active_workspace');
+                if (savedActiveWs) {
+                    const exists = allWorkspaces.find((w) => String(w.pro_ide) === String(savedActiveWs));
+                    if (exists) {
+                        setActiveWorkspaceId(savedActiveWs);
+                    }
+                } else if (allWorkspaces.length > 0) {
+                    setActiveWorkspaceId(allWorkspaces[0].pro_ide);
+                }
+
+                const savedView = localStorage.getItem('sk_selected_view');
+                const cookieListId = String(getCookie(LAST_VIEW_PRO_IDE_COOKIE) ?? '');
+                if (cookieListId) {
+                    const allListas = allWorkspaces.flatMap((w) => collectListas(w));
+                    const lista = allListas.find((l) => String(l.pro_ide) === cookieListId);
+                    if (lista) {
+                        const workspace = findWorkspaceForList(allWorkspaces, String(lista.pro_ide));
+                        if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                        setSelectedView({ type: 'list', lista });
+                        setSelectedLista(lista);
+                        return;
+                    }
+                }
+                if (savedView) {
+                    try {
+                        const { type, id } = JSON.parse(savedView) as { type: string; id: string };
+                        const allListas = allWorkspaces.flatMap((w) => collectListas(w));
+                        const allFolders = allWorkspaces.flatMap((w) => collectFolders(w));
+                        const allSpaces = allWorkspaces.flatMap((w) => collectSpaces(w));
+
+                        if (type === 'list') {
+                            const lista = allListas.find((l) => String(l.pro_ide) === String(id));
+                            if (lista) {
+                                const workspace = findWorkspaceForList(allWorkspaces, String(lista.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                setSelectedView({ type: 'list', lista });
+                                setSelectedLista(lista);
+                                return;
+                            }
+                        } else if (type === 'folder') {
+                            const folder = allFolders.find((f) => String(f.pro_ide) === String(id));
+                            if (folder) {
+                                const workspace = findWorkspaceForFolder(allWorkspaces, String(folder.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                setSelectedView({ type: 'folder', folder });
+                                setSelectedLista(null);
+                                return;
+                            }
+                        } else if (type === 'space') {
+                            const space = allSpaces.find((s) => String(s.pro_ide) === String(id));
+                            if (space) {
+                                const workspace = findWorkspaceForSpace(allWorkspaces, String(space.pro_ide));
+                                if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+                                setSelectedView({ type: 'space', space });
+                                setSelectedLista(null);
+                                return;
+                            }
+                        } else if (type === 'workspace') {
+                            const ws = allWorkspaces.find((w) => String(w.pro_ide) === String(id));
+                            if (ws) {
+                                setActiveWorkspaceId(String(ws.pro_ide));
+                                setSelectedView({ type: 'workspace', workspace: ws });
+                                setSelectedLista(null);
+                                return;
+                            }
+                        } else if (type === 'group') {
+                            // Groups are handled separately via selectGrupo
+                            setSelectedView(null);
+                            setSelectedLista(null);
+                            return;
+                        }
+                    } catch {
+                        // If parsing fails, just ignore
+                    }
+                }
+            }
+        } catch {
+            // If cache is corrupted, ignore and let normal flow handle it
+        }
+    }
     async function loadProyectos() {
         if (token) await loadProyectosInternal(token);
     }
@@ -628,7 +963,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         setActiveWorkspaceId(ws.pro_ide);
         setSelectedView({ type: 'workspace', workspace: ws });
         setSelectedLista(null);
+        deleteCookie(LAST_VIEW_PRO_IDE_COOKIE);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'workspace', id: ws.pro_ide }));
+        // Keep selection changes inside the persistent /dashboard shell whenever possible.
+        // For future edits / LLMs: avoid navigation patterns that remount the dashboard layout/sidebar.
         if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
@@ -636,41 +974,30 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         if (workspaceId) setActiveWorkspaceId(workspaceId);
         setSelectedView({ type: 'space', space });
         setSelectedLista(null);
+        deleteCookie(LAST_VIEW_PRO_IDE_COOKIE);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'space', id: space.pro_ide }));
         if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectFolder(folder: Folder) {
+        const allWorkspaces = [...workspaces, ...groupWorkspaces];
+        const workspace = findWorkspaceForFolder(allWorkspaces, String(folder.pro_ide));
+        if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
         setSelectedView({ type: 'folder', folder });
         setSelectedLista(null);
+        deleteCookie(LAST_VIEW_PRO_IDE_COOKIE);
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'folder', id: folder.pro_ide }));
         if (pathname !== '/dashboard') router.push('/dashboard');
     }
 
     function selectLista(lista: Lista) {
+        const allWorkspaces = [...workspaces, ...groupWorkspaces];
+        const workspace = findWorkspaceForList(allWorkspaces, String(lista.pro_ide));
+        if (workspace) setActiveWorkspaceId(String(workspace.pro_ide));
+        setCookie(LAST_VIEW_PRO_IDE_COOKIE, String(lista.pro_ide), { sameSite: 'lax' });
         localStorage.setItem('sk_selected_view', JSON.stringify({ type: 'list', id: lista.pro_ide }));
-
-        // Para listas de grupo, el árbol puede venir sin tareas; intentamos traer el detalle real por pro_ide.
-        if (token) {
-            skambaConseguirProyecto(token, Number(lista.pro_ide))
-                .then((res) => {
-                    if (res.success && res.data && (res.data as any).pro_tip === 'list') {
-                        const fresh = res.data as Lista;
-                        setSelectedView({ type: 'list', lista: fresh });
-                        setSelectedLista(fresh);
-                        return;
-                    }
-                    setSelectedView({ type: 'list', lista });
-                    setSelectedLista(lista);
-                })
-                .catch(() => {
-                    setSelectedView({ type: 'list', lista });
-                    setSelectedLista(lista);
-                });
-        } else {
-            setSelectedView({ type: 'list', lista });
-            setSelectedLista(lista);
-        }
+        setSelectedView({ type: 'list', lista });
+        setSelectedLista(lista);
 
         if (pathname !== '/dashboard') router.push('/dashboard');
     }
@@ -684,12 +1011,33 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
     const { logout: authLogout } = useAuth();
     function logout() {
+        // Clear all cached data on logout
+        localStorage.removeItem('sk_group_workspaces_cache');
+        localStorage.removeItem('sk_open_workspaces');
+        localStorage.removeItem('sk_open_spaces');
+        localStorage.removeItem('sk_open_folders');
+        localStorage.removeItem('sk_active_workspace');
+        localStorage.removeItem('sk_selected_view');
+
+        // Reset state
+        setGroupWorkspaces([]);
+        setWorkspaces([]);
+        setSelectedView(null);
+        setSelectedLista(null);
+        setOpenWorkspaces(new Set());
+        setOpenSpaces(new Set());
+        setOpenFolders(new Set());
+
+        // Reset refs for next login
+        hasLoadedRef.current = false;
+        lastTokenRef.current = null;
+
         authLogout();
     }
 
     const activeWorkspace =
-        workspaces.find((w) => w.pro_ide === activeWorkspaceId) ||
-        groupWorkspaces.find((w) => w.pro_ide === activeWorkspaceId) ||
+        workspaces.find((w) => String(w.pro_ide) === String(activeWorkspaceId)) ||
+        groupWorkspaces.find((w) => String(w.pro_ide) === String(activeWorkspaceId)) ||
         null;
 
     return (

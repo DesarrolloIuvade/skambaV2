@@ -1,7 +1,10 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL;
+import { getApiBaseUrl } from './api/base';
+
+const BASE_URL = getApiBaseUrl();
 
 export async function apiRequest<T>(endpoint: string, body?: any): Promise<T> {
-  const res = await fetch(`${BASE_URL}/${endpoint}`, {
+  const normalizedEndpoint = endpoint.replace(/^\/+/, '');
+  const res = await fetch(`${BASE_URL}${normalizedEndpoint}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

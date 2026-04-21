@@ -212,11 +212,9 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated, mi
     return (
         <div
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={createdTareaId ? onCreated : onClose}
         >
             <div
                 className={`${isMaximized ? 'w-full h-full max-w-none max-h-none rounded-none' : 'w-full max-w-5xl max-h-[90vh] rounded-xl'} bg-white dark:bg-zinc-900 shadow-2xl flex flex-col border border-zinc-200 dark:border-zinc-800 overflow-hidden transition-all duration-300`}
-                onClick={e => e.stopPropagation()}
             >
                 {/* ── TOP BAR: Estado · Prioridad · Cerrar ── */}
                 <div className="flex items-center gap-2 px-5 pt-4 pb-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
@@ -402,6 +400,11 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated, mi
                                 type="text"
                                 value={nombre}
                                 onChange={e => setNombre(e.target.value)}
+                                onKeyDown={e => {
+                                    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                                        e.preventDefault();
+                                    }
+                                }}
                                 placeholder="Escribe el nombre de la tarea..."
                                 autoFocus
                                 className="w-full text-2xl font-semibold bg-transparent border-0 outline-none focus:ring-0 text-zinc-900 dark:text-white placeholder-zinc-300 dark:placeholder-zinc-600"
@@ -417,9 +420,9 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated, mi
                                     onChange={e => setUsuDesId(e.target.value)}
                                     className="w-full text-sm bg-transparent border-0 focus:ring-0 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
                                 >
-                                    <option value="">Sin asignar</option>
+                                    <option className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800" value="">Sin asignar</option>
                                     {usuarios.map(u => (
-                                        <option key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
+                                        <option className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800" key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
                                     ))}
                                 </select>
                             </div>
@@ -574,6 +577,11 @@ export function TaskCreateModal({ lista, defaultEstadoId, onClose, onCreated, mi
                             <textarea
                                 value={nuevoComentario}
                                 onChange={e => setNuevoComentario(e.target.value)}
+                                onKeyDown={e => {
+                                    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                                        e.preventDefault();
+                                    }
+                                }}
                                 placeholder={createdTareaId ? 'Escribe un comentario...' : 'Crea la tarea primero...'}
                                 disabled={!createdTareaId}
                                 rows={3}

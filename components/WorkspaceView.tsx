@@ -1,16 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Workspace,
     Lista,
     Tarea,
-    Miembro,
+    type EstadoProyecto,
+    type Miembro,
+    skambaConseguirProyecto,
+    skambaDashboardMisTareas,
+    skambaVerTarea,
 } from '../lib/api';
-import { useAuthStore } from '../context/useAuthStore';
 import { useDashboard } from '../context/DashboardContext';
+import { useAuthStore } from '../context/useAuthStore';
 import { TaskDetailModal } from './TaskDetailModal';
 import { TaskCreateModal } from './TaskCreateModal';
+import type { DashboardMisTareasData } from '../lib/types/tarea';
 
 interface WorkspaceViewProps {
     workspace: Workspace;
@@ -22,13 +27,16 @@ type StatusCategory = 'inprogress' | 'pending' | 'completed' | 'other';
 interface TaskRow {
     tar_ide: string;
     tar_nom: string;
-    tarea: Tarea;
+    proIde: string;
+    tarea: Tarea | null;
     listaNom: string;
     listaPath: string;
-    lista: Lista;
+    lista: Lista | null;
     statusName: string;
     statusColor: string;
     cat: StatusCategory;
+    dueDate: string | null;
+    priorityLabel: string;
 }
 
 function categorizeName(name: string): StatusCategory {
@@ -39,76 +47,275 @@ function categorizeName(name: string): StatusCategory {
     return 'other';
 }
 
+function getPriorityLabel(priorityId?: number | null) {
+    if (priorityId === 1) return 'Alta';
+    if (priorityId === 2) return 'Media';
+    if (priorityId === 3) return 'Baja';
+    return 'Sin prioridad';
+}
+
+function formatDueDate(date?: string | null) {
+    if (!date) return null;
+
+    const parsed = new Date(date);
+    if (Number.isNaN(parsed.getTime())) return date;
+
+    return parsed.toLocaleDateString('es-PE', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+}
+
+const dashboardRequestCache = new Map<string, Promise<DashboardMisTareasData>>();
+
 export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
     const { loadProyectos } = useDashboard();
+    const { token } = useAuthStore();
     const [selectedTask, setSelectedTask] = useState<TaskRow | null>(null);
+    const [selectedTaskList, setSelectedTaskList] = useState<Lista | null>(null);
     const [createListaId, setCreateListaId] = useState<string>('');
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [dashboardRows, setDashboardRows] = useState<TaskRow[]>([]);
+    const [dashboardResumen, setDashboardResumen] = useState<{
+        total: number;
+        pendientes: number;
+        en_proceso: number;
+        completas: number;
+        vencidas: number;
+        asignadas_a_mi: number;
+        sin_asignar: number;
+        prioridad_alta: number;
+    } | null>(null);
+    const [dashboardLoading, setDashboardLoading] = useState(true);
+    const [dashboardError, setDashboardError] = useState('');
+    const [refreshKey, setRefreshKey] = useState(0);
+    const [openingTaskId, setOpeningTaskId] = useState<string | null>(null);
+    const [projectStates, setProjectStates] = useState<Record<string, EstadoProyecto[]>>({});
+    const [projectMembers, setProjectMembers] = useState<Record<string, Miembro[]>>({});
+    const [dashboardData, setDashboardData] = useState<DashboardMisTareasData | null>(null);
 
     const spaces = workspace.spaces;
     const folders = spaces.flatMap((s) => s.contenido?.folders ?? []);
 
-    // Flatten all lists with breadcrumb path
-    const listsWithPaths: Array<Lista & { path: string }> = [];
-    spaces.forEach((space) => {
-        (space.contenido?.listas ?? []).forEach((lista) =>
-            listsWithPaths.push({ ...lista, path: space.pro_nom }),
-        );
-        (space.contenido?.folders ?? []).forEach((folder) =>
-            folder.listas.forEach((lista) =>
-                listsWithPaths.push({ ...lista, path: `${space.pro_nom} › ${folder.pro_nom}` }),
-            ),
-        );
-    });
+    const listsWithPaths = useMemo(() => {
+        const items: Array<Lista & { path: string }> = [];
+        spaces.forEach((space) => {
+            (space.contenido?.listas ?? []).forEach((lista) =>
+                items.push({ ...lista, path: space.pro_nom }),
+            );
+            (space.contenido?.folders ?? []).forEach((folder) =>
+                folder.listas.forEach((lista) =>
+                    items.push({ ...lista, path: `${space.pro_nom} › ${folder.pro_nom}` }),
+                ),
+            );
+        });
+        return items;
+    }, [spaces]);
 
-    // Build flat task rows categorized by individual task status
-    const taskRows: TaskRow[] = listsWithPaths.flatMap((lista) =>
-        lista.tareas.map((t) => {
-            const estado = lista.estados.find((e) => e.p_e_ide === t.tar_est);
-            const statusName = estado?.est_nom ?? 'Sin estado';
-            const statusColor = estado?.color ?? '#a1a1aa';
-            return {
-                tar_ide: t.tar_ide,
-                tar_nom: t.tar_nom,
-                tarea: t,
-                listaNom: lista.pro_nom,
-                listaPath: lista.path,
-                lista,
+    useEffect(() => {
+        let active = true;
+
+        async function loadDashboard() {
+            setDashboardLoading(true);
+            setDashboardError('');
+            try {
+                const cacheKey = `${token ?? ''}:${refreshKey}`;
+                let request = dashboardRequestCache.get(cacheKey);
+
+                if (!request) {
+                    request = skambaDashboardMisTareas(token ?? '').then((response) => {
+                        if (!response.success) {
+                            throw new Error(response.message || 'No se pudo cargar la vista general');
+                        }
+                        return response.data;
+                    });
+                    dashboardRequestCache.set(cacheKey, request);
+                }
+
+                const data = await request;
+
+                if (!active) return;
+                setDashboardData(data);
+                setDashboardResumen(data.dashboard?.resumen ?? null);
+                setProjectStates(data.estados_por_proyecto ?? {});
+                setProjectMembers(data.miembros_por_proyecto ?? {});
+            } catch (error) {
+                if (!active) return;
+                setDashboardData(null);
+                setDashboardRows([]);
+                setDashboardResumen(null);
+                setProjectStates({});
+                setProjectMembers({});
+                setDashboardError(error instanceof Error ? error.message : 'Error inesperado al cargar el dashboard');
+            } finally {
+                if (active) setDashboardLoading(false);
+            }
+        }
+
+        void loadDashboard();
+
+        return () => {
+            active = false;
+        };
+    }, [refreshKey, token]);
+
+    useEffect(() => {
+        const listsById = new Map(
+            listsWithPaths.map((lista) => [String(lista.pro_ide), lista]),
+        );
+
+        const rows = (dashboardData?.tareas ?? []).map((task) => {
+            const taskListId = String(task.lista?.pro_ide ?? task.pro_ide ?? '');
+            const linkedList = taskListId ? listsById.get(taskListId) ?? null : null;
+            const statusName = task.est_nom?.trim() || 'Sin estado';
+            const fallbackTask: Tarea | null = linkedList ? {
+                tar_ide: String(task.tar_ide),
+                pro_ide: taskListId || String(linkedList.pro_ide),
+                tar_nom: task.tar_nom,
+                tar_des: task.tar_des ?? '',
+                usu_des: task.usu_des ? String(task.usu_des) : null,
+                tar_gen: '',
+                tar_fch: task.tar_fch ?? null,
+                pri_ide: task.pri_ide ? String(task.pri_ide) : null,
+                est_ado: '1',
+                tar_est: linkedList.estados.find(
+                    (estado) => estado.est_nom.toLowerCase().trim() === statusName.toLowerCase(),
+                )?.p_e_ide ?? linkedList.estados[0]?.p_e_ide ?? '',
+                p_t_ide: null,
+                tar_pad: null,
+            } : null;
+
+                    return {
+                        tar_ide: String(task.tar_ide),
+                        tar_nom: task.tar_nom,
+                        proIde: taskListId,
+                        tarea: fallbackTask,
+                        listaNom: linkedList?.pro_nom ?? task.lista?.pro_nom ?? task.pro_nom ?? 'Sin lista',
+                        listaPath: linkedList?.path ?? '',
+                lista: linkedList,
                 statusName,
-                statusColor,
+                statusColor:
+                    linkedList?.estados.find(
+                        (estado) => estado.est_nom.toLowerCase().trim() === statusName.toLowerCase(),
+                    )?.color ?? '#6366f1',
                 cat: categorizeName(statusName),
-            };
-        }),
-    );
+                dueDate: formatDueDate(task.tar_fch),
+                priorityLabel: getPriorityLabel(task.pri_ide),
+            } satisfies TaskRow;
+        });
 
-    const totalTasks = taskRows.length;
+        setDashboardRows(rows);
+    }, [dashboardData, listsWithPaths]);
+
+    const totalTasks = dashboardResumen?.total ?? dashboardRows.length;
     const totalLists = listsWithPaths.length;
 
-    const inProgressTasks = taskRows.filter((t) => t.cat === 'inprogress');
-    const pendingTasks = taskRows.filter((t) => t.cat === 'pending');
-    const completedTasks = taskRows.filter((t) => t.cat === 'completed');
-    const otherTasks = taskRows.filter((t) => t.cat === 'other');
+    const inProgressTasks = dashboardRows.filter((t) => t.cat === 'inprogress');
+    const pendingTasks = dashboardRows.filter((t) => t.cat === 'pending');
+    const completedTasks = dashboardRows.filter((t) => t.cat === 'completed');
+    const otherTasks = dashboardRows.filter((t) => t.cat === 'other');
 
-    // --- Members panel state ---
-    // Collect members from all listas in the workspace (deduplicated by p_m_ide or usu_ide)
-    const miembros: Miembro[] = listsWithPaths.reduce((acc: Miembro[], lista) => {
-        if (lista.miembros && lista.miembros.length > 0) {
-            lista.miembros.forEach(m => {
-                // Deduplicar por p_m_ide si existe, sino por usu_ide
-                const existingIndex = acc.findIndex(existing =>
-                    (m.p_m_ide && existing.p_m_ide === m.p_m_ide) ||
-                    (!m.p_m_ide && existing.usu_ide === m.usu_ide)
-                );
-                if (existingIndex === -1) {
-                    acc.push(m);
-                }
+    async function handleOpenTask(row: TaskRow) {
+        if (openingTaskId === row.tar_ide) return;
+
+        if (row.tarea && row.lista) {
+            const listId = String(row.lista.pro_ide);
+            const fallbackMembers = projectMembers[listId] ?? row.lista.miembros ?? [];
+            setSelectedTask(row);
+            setSelectedTaskList({
+                ...row.lista,
+                miembros: fallbackMembers,
             });
+            return;
         }
-        return acc;
-    }, []);
 
-    const [addError, setAddError] = useState('');
-    const { user: storeUser } = useAuthStore();
+        setOpeningTaskId(row.tar_ide);
+        try {
+            const taskRes = await skambaVerTarea('', Number(row.tar_ide), Number(row.proIde));
+            if (!taskRes.success || !taskRes.data) return;
+
+            const task = taskRes.data;
+            const listId = String(task.pro_ide ?? '');
+            const localList = listsWithPaths.find((lista) => String(lista.pro_ide) === listId) ?? null;
+            const fallbackStates = projectStates[listId] ?? [];
+            const fallbackMembers = projectMembers[listId] ?? taskRes.miembros ?? [];
+
+            if (localList) {
+                setSelectedTask({
+                    ...row,
+                    tarea: task,
+                    lista: localList,
+                    listaNom: localList.pro_nom,
+                    listaPath: localList.path,
+                    statusColor:
+                        localList.estados.find((estado) => estado.p_e_ide === task.tar_est)?.color ??
+                        row.statusColor,
+                    statusName:
+                        localList.estados.find((estado) => estado.p_e_ide === task.tar_est)?.est_nom ??
+                        row.statusName,
+                });
+                setSelectedTaskList({
+                    ...localList,
+                    miembros: fallbackMembers.length > 0 ? fallbackMembers : localList.miembros,
+                });
+                return;
+            }
+
+            if (fallbackStates.length > 0) {
+                const syntheticList: Lista = {
+                    pro_ide: listId,
+                    pro_nom: row.listaNom !== 'Sin lista' ? row.listaNom : 'Lista',
+                    usu_ide: workspace.usu_ide,
+                    pro_pad: workspace.pro_ide,
+                    est_ado: '1',
+                    pro_tip: 'list',
+                    tareas: [task],
+                    estados: fallbackStates,
+                    miembros: fallbackMembers,
+                };
+
+                setSelectedTask({
+                    ...row,
+                    tarea: task,
+                    lista: syntheticList,
+                    statusColor:
+                        fallbackStates.find((estado) => estado.p_e_ide === task.tar_est)?.color ??
+                        row.statusColor,
+                    statusName:
+                        fallbackStates.find((estado) => estado.p_e_ide === task.tar_est)?.est_nom ??
+                        row.statusName,
+                });
+                setSelectedTaskList(syntheticList);
+                return;
+            }
+
+            const listRes = await skambaConseguirProyecto(token ?? '', Number(task.pro_ide));
+            if (!listRes.success || !listRes.data || !('tareas' in listRes.data)) return;
+
+            const remoteList = listRes.data as Lista;
+            const resolvedTask = remoteList.tareas.find(
+                (candidate) => String(candidate.tar_ide) === String(task.tar_ide),
+            ) ?? task;
+
+            setSelectedTask({
+                ...row,
+                tarea: resolvedTask,
+                lista: remoteList,
+                listaNom: remoteList.pro_nom,
+                listaPath: '',
+                statusColor:
+                    remoteList.estados.find((estado) => estado.p_e_ide === resolvedTask.tar_est)?.color ??
+                    row.statusColor,
+                statusName:
+                    remoteList.estados.find((estado) => estado.p_e_ide === resolvedTask.tar_est)?.est_nom ??
+                    row.statusName,
+            });
+            setSelectedTaskList(remoteList);
+        } finally {
+            setOpeningTaskId(null);
+        }
+    }
 
     return (
         <div className="flex h-full overflow-hidden">
@@ -117,11 +324,11 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-3">
                     <div className="w-9 h-9 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-bold text-base shrink-0">
-                        {workspace.pro_nom.charAt(0).toUpperCase()}
+                        M
                     </div>
                     <div className="min-w-0">
                         <h1 className="text-base font-bold text-zinc-900 dark:text-white truncate">
-                            {workspace.pro_nom}
+                            Mis tareas
                         </h1>
                         <p className="text-[11px] text-zinc-400">
                             {folders.length} carpeta{folders.length !== 1 ? 's' : ''} &middot;{' '}
@@ -131,14 +338,14 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                     </div>
                     {/* Summary pills */}
                     <div className="ml-auto flex items-center gap-2 shrink-0">
-                        {inProgressTasks.length > 0 && (
+                        {(dashboardResumen?.en_proceso ?? inProgressTasks.length) > 0 && (
                             <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">
-                                {inProgressTasks.length} en proceso
+                                {dashboardResumen?.en_proceso ?? inProgressTasks.length} en proceso
                             </span>
                         )}
-                        {pendingTasks.length > 0 && (
+                        {(dashboardResumen?.pendientes ?? pendingTasks.length) > 0 && (
                             <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">
-                                {pendingTasks.length} pendiente{pendingTasks.length !== 1 ? 's' : ''}
+                                {dashboardResumen?.pendientes ?? pendingTasks.length} pendiente{(dashboardResumen?.pendientes ?? pendingTasks.length) !== 1 ? 's' : ''}
                             </span>
                         )}
                         {listsWithPaths.length > 0 && (
@@ -171,7 +378,33 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                 </div>
 
                 {/* Task rows */}
-                {totalTasks === 0 ? (
+                {dashboardLoading ? (
+                    <div className="flex flex-col items-center justify-center py-24 text-center">
+                        <div className="w-12 h-12 mb-3 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                            <svg className="w-6 h-6 text-zinc-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4.75 12a7.25 7.25 0 1014.5 0 7.25 7.25 0 10-14.5 0z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.75A7.25 7.25 0 0119.25 12" />
+                            </svg>
+                        </div>
+                        <p className="text-sm text-zinc-500">Cargando mis tareas</p>
+                    </div>
+                ) : dashboardError ? (
+                    <div className="flex flex-col items-center justify-center py-24 text-center px-6">
+                        <div className="w-12 h-12 mb-3 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center text-red-500">
+                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M10.34 3.94L2.93 16.5A2.25 2.25 0 004.87 20h14.26a2.25 2.25 0 001.94-3.5L13.66 3.94a2.25 2.25 0 00-3.32 0z" />
+                            </svg>
+                        </div>
+                        <p className="text-sm text-zinc-600 dark:text-zinc-300">{dashboardError}</p>
+                        <button
+                            onClick={() => setRefreshKey((value) => value + 1)}
+                            className="mt-4 inline-flex items-center gap-2 px-3 py-2 text-xs font-medium text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                ) : totalTasks === 0 ? (
                     <div className="flex flex-col items-center justify-center py-24 text-center">
                         <div className="w-12 h-12 mb-3 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
                             <svg className="w-6 h-6 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -188,7 +421,8 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                             dotColor="bg-orange-500"
                             tasks={inProgressTasks}
                             onSelectList={onSelectList}
-                            onSelectTask={setSelectedTask}
+                            onSelectTask={handleOpenTask}
+                            openingTaskId={openingTaskId}
                             defaultOpen
                         />
                         <TaskGroup
@@ -196,7 +430,8 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                             dotColor="bg-red-500"
                             tasks={pendingTasks}
                             onSelectList={onSelectList}
-                            onSelectTask={setSelectedTask}
+                            onSelectTask={handleOpenTask}
+                            openingTaskId={openingTaskId}
                             defaultOpen
                         />
                         <TaskGroup
@@ -204,7 +439,8 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                             dotColor="bg-green-500"
                             tasks={completedTasks}
                             onSelectList={onSelectList}
-                            onSelectTask={setSelectedTask}
+                            onSelectTask={handleOpenTask}
+                            openingTaskId={openingTaskId}
                             defaultOpen={false}
                         />
                         <TaskGroup
@@ -212,7 +448,8 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                             dotColor="bg-zinc-400"
                             tasks={otherTasks}
                             onSelectList={onSelectList}
-                            onSelectTask={setSelectedTask}
+                            onSelectTask={handleOpenTask}
+                            openingTaskId={openingTaskId}
                             defaultOpen={false}
                         />
                     </div>
@@ -220,12 +457,21 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
             </div>
 
             {/* ── Task detail modal ── */}
-            {selectedTask && (
+            {selectedTask?.tarea && selectedTaskList && (
                 <TaskDetailModal
                     tarea={selectedTask.tarea}
-                    lista={selectedTask.lista}
-                    onClose={() => setSelectedTask(null)}
-                    onUpdate={() => { loadProyectos(); setSelectedTask(null); }}
+                    lista={selectedTaskList}
+                    miembros={selectedTaskList.miembros ?? []}
+                    onClose={() => {
+                        setSelectedTask(null);
+                        setSelectedTaskList(null);
+                    }}
+                    onUpdate={() => {
+                        loadProyectos();
+                        setRefreshKey((value) => value + 1);
+                        setSelectedTask(null);
+                        setSelectedTaskList(null);
+                    }}
                 />
             )}
 
@@ -237,50 +483,15 @@ export function WorkspaceView({ workspace, onSelectList }: WorkspaceViewProps) {
                     <TaskCreateModal
                         lista={lista}
                         onClose={() => setShowCreateModal(false)}
-                        onCreated={() => { setShowCreateModal(false); setCreateListaId(''); loadProyectos(); }}
+                        onCreated={() => {
+                            setShowCreateModal(false);
+                            setCreateListaId('');
+                            loadProyectos();
+                            setRefreshKey((value) => value + 1);
+                        }}
                     />
                 );
             })()}
-
-            {/* ── Right: Members panel ── */}
-            <div className="w-64 shrink-0 border-l border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-900/50">
-                <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
-                    <h2 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                        Miembros
-                    </h2>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {miembros.length === 0 ? (
-                        <p className="text-xs text-zinc-400 text-center py-4">
-                            Sin miembros en este proyecto.
-                        </p>
-                    ) : (
-                        <div className="space-y-1">
-                            {miembros.map((m) => (
-                                <div
-                                    key={m.usu_ide}
-                                    className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                >
-                                    <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 text-[11px] font-semibold shrink-0">
-                                        {m.usu_nom.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">
-                                            {m.usu_nom}
-                                        </p>
-                                        {m.usu_ema && (
-                                            <p className="text-[10px] text-zinc-400 truncate">
-                                                {m.usu_ema}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
         </div>
     );
 }
@@ -293,13 +504,15 @@ function TaskGroup({
     tasks,
     onSelectList,
     onSelectTask,
+    openingTaskId,
     defaultOpen,
 }: {
     label: string;
     dotColor: string;
     tasks: TaskRow[];
     onSelectList: (lista: Lista) => void;
-    onSelectTask: (row: TaskRow) => void;
+    onSelectTask: (row: TaskRow) => void | Promise<void>;
+    openingTaskId: string | null;
     defaultOpen: boolean;
 }) {
     const [open, setOpen] = useState(defaultOpen);
@@ -341,6 +554,12 @@ function TaskGroup({
                             Lista
                         </span>
                         <span className="w-28 shrink-0 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                            Fecha
+                        </span>
+                        <span className="w-28 shrink-0 text-[10px] font-medium text-zinc-400 uppercase tracking-wider hidden lg:block">
+                            Prioridad
+                        </span>
+                        <span className="w-28 shrink-0 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
                             Estado
                         </span>
                     </div>
@@ -348,8 +567,10 @@ function TaskGroup({
                     {tasks.map((t) => (
                         <div
                             key={t.tar_ide}
-                            onClick={() => onSelectTask(t)}
-                            className="flex items-center gap-3 px-6 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors border-b border-zinc-50 dark:border-zinc-800/30 last:border-0 cursor-pointer"
+                            onClick={() => {
+                                void onSelectTask(t);
+                            }}
+                            className="flex items-center gap-3 px-6 py-2.5 transition-colors border-b border-zinc-50 dark:border-zinc-800/30 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 cursor-pointer"
                         >
                             {/* Task name */}
                             <p className="flex-1 text-sm text-zinc-800 dark:text-zinc-200 truncate min-w-0">
@@ -358,11 +579,18 @@ function TaskGroup({
 
                             {/* List link */}
                             <button
-                                onClick={(e) => { e.stopPropagation(); onSelectList(t.lista); }}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (t.lista) onSelectList(t.lista);
+                                }}
+                                disabled={!t.lista}
                                 className="w-40 shrink-0 text-left hidden sm:block"
-                                title={`${t.listaPath} › ${t.listaNom}`}
+                                title={t.listaPath ? `${t.listaPath} › ${t.listaNom}` : t.listaNom}
                             >
-                                <span className="block text-xs text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 truncate transition-colors">
+                                <span className={`block text-xs truncate transition-colors ${t.lista
+                                    ? 'text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300'
+                                    : 'text-zinc-400'
+                                    }`}>
                                     {t.listaNom}
                                 </span>
                                 {t.listaPath && (
@@ -371,6 +599,18 @@ function TaskGroup({
                                     </span>
                                 )}
                             </button>
+
+                            <span className="w-28 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                {t.dueDate ?? 'Sin fecha'}
+                            </span>
+
+                            <span className="w-28 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400 hidden lg:block truncate">
+                                {t.priorityLabel}
+                            </span>
+
+                            {openingTaskId === t.tar_ide && (
+                                <span className="text-[10px] text-zinc-400 shrink-0">Abriendo...</span>
+                            )}
 
                             {/* Status badge */}
                             <span

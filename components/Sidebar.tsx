@@ -11,6 +11,7 @@ import {
     skambaConseguirGruposUsuario, skambaMostrarPlantillas,
     skambaCrearGrupo, skambaCrearPlantilla,
 } from '../lib/api';
+import { TASKS_UPDATED_EVENT, type TasksUpdatedDetail } from '../lib/task-events';
 import CreateModal from './CreateModal';
 import { AddMemberModal } from './AddMemberModal';
 import { useAuth } from '../hooks/useAuth';
@@ -228,6 +229,7 @@ export function Sidebar() {
                                 <div key={space.pro_ide}>
                                     <SpaceItem
                                         space={space}
+                                        isGroupWorkspace={isActiveGroupWorkspace}
                                         isOpen={openSpaces.has(space.pro_ide)}
                                         onToggle={() => toggleSpace(space.pro_ide)}
                                         selectedView={selectedView}
@@ -329,12 +331,82 @@ export function Sidebar() {
 }
 
 // Sub-component for individual list items
+type SidebarTaskLike = Lista['tareas'][number] & { est_nom?: string | null };
+
+function categorizeStatusName(name?: string | null): 'pending' | 'inprogress' | 'completed' | 'other' {
+    const normalized = name?.trim().toLowerCase() ?? '';
+    if (!normalized) return 'other';
+    if (normalized.includes('proceso') || normalized.includes('progreso')) return 'inprogress';
+    if (normalized.includes('pendiente')) return 'pending';
+    if (normalized.includes('complet') || normalized.includes('finaliz') || normalized.includes('cerrad')) return 'completed';
+    return 'other';
+}
+
+function readPendingCount(value: unknown): number | null {
+    if (Array.isArray(value)) return value.length;
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+}
+
+function getPendingTaskCount(lista: Lista) {
+    const fromTree = readPendingCount(lista.tareas_pendientes_total) ?? readPendingCount(lista.tareas_pendientes);
+    if (fromTree !== null) return fromTree;
+
+    return (lista.tareas ?? []).filter((tarea) => {
+        const estado = lista.estados.find((item) => String(item.p_e_ide) === String(tarea.tar_est));
+        const statusName = estado?.est_nom ?? (tarea as SidebarTaskLike).est_nom;
+        return categorizeStatusName(statusName) === 'pending';
+    }).length;
+}
+
+function getPendingTaskCountFromTasks(tareas: SidebarTaskLike[]) {
+    return tareas.filter((tarea) => categorizeStatusName(tarea.est_nom) === 'pending').length;
+}
+
+function ListPendingBadge({ lista, isGroupWorkspace }: { lista: Lista; isGroupWorkspace: boolean }) {
+    const initialCount = getPendingTaskCount(lista);
+    const [pendingCount, setPendingCount] = useState(initialCount);
+
+    useEffect(() => {
+        setPendingCount(initialCount);
+    }, [
+        initialCount,
+        lista.pro_ide,
+        lista.tareas_pendientes,
+        lista.tareas_pendientes_total,
+    ]);
+
+    useEffect(() => {
+        function handleTasksUpdated(event: Event) {
+            const customEvent = event as CustomEvent<TasksUpdatedDetail>;
+            if (String(customEvent.detail?.proIde ?? '') !== String(lista.pro_ide)) return;
+            if (typeof customEvent.detail?.pendingCount !== 'number') return;
+            setPendingCount(customEvent.detail.pendingCount);
+        }
+
+        window.addEventListener(TASKS_UPDATED_EVENT, handleTasksUpdated as EventListener);
+        return () => {
+            window.removeEventListener(TASKS_UPDATED_EVENT, handleTasksUpdated as EventListener);
+        };
+    }, [lista.pro_ide]);
+
+    if (pendingCount <= 0) return null;
+
+    return (
+        <span className="ml-auto rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-300 group-hover:hidden">
+            {pendingCount}
+        </span>
+    );
+}
+
 function ListItem({
     lista,
+    isGroupWorkspace,
     selectedView,
     onSelectList,
 }: {
     lista: Lista;
+    isGroupWorkspace: boolean;
     selectedView: import('../context/DashboardContext').SelectedView;
     onSelectList: (l: Lista) => void;
 }) {
@@ -378,7 +450,7 @@ function ListItem({
                 >
                     <ListIcon />
                     <span className="truncate flex-1">{lista.pro_nom}</span>
-                    <span className="ml-auto text-xs text-zinc-400 group-hover:hidden">{lista.tareas.length}</span>
+                    <ListPendingBadge lista={lista} isGroupWorkspace={isGroupWorkspace} />
                 </button>
             )}
             {!isEditing && (
@@ -406,6 +478,7 @@ function ListItem({
 // Sub-component for Folder rendering
 function FolderItem({
     folder,
+    isGroupWorkspace,
     isOpen,
     onToggle,
     selectedView,
@@ -414,6 +487,7 @@ function FolderItem({
     onStartCreating
 }: {
     folder: Folder;
+    isGroupWorkspace: boolean;
     isOpen: boolean;
     onToggle: () => void;
     selectedView: import('../context/DashboardContext').SelectedView;
@@ -496,6 +570,7 @@ function FolderItem({
                         <ListItem
                             key={lista.pro_ide}
                             lista={lista}
+                            isGroupWorkspace={isGroupWorkspace}
                             selectedView={selectedView}
                             onSelectList={onSelectList}
                         />
@@ -515,6 +590,7 @@ function FolderItem({
 // Sub-component for Space rendering
 function SpaceItem({
     space,
+    isGroupWorkspace,
     isOpen,
     onToggle,
     selectedView,
@@ -526,6 +602,7 @@ function SpaceItem({
     onStartCreating,
 }: {
     space: Space;
+    isGroupWorkspace: boolean;
     isOpen: boolean;
     onToggle: () => void;
     selectedView: import('../context/DashboardContext').SelectedView;
@@ -612,6 +689,7 @@ function SpaceItem({
                         <FolderItem
                             key={folder.pro_ide}
                             folder={folder}
+                            isGroupWorkspace={isGroupWorkspace}
                             isOpen={openFolders.has(folder.pro_ide)}
                             onToggle={() => toggleFolder(folder.pro_ide)}
                             selectedView={selectedView}
@@ -624,6 +702,7 @@ function SpaceItem({
                         <ListItem
                             key={lista.pro_ide}
                             lista={lista}
+                            isGroupWorkspace={isGroupWorkspace}
                             selectedView={selectedView}
                             onSelectList={onSelectList}
                         />
@@ -949,4 +1028,3 @@ function PlantillasSection() {
         </div>
     );
 }
-

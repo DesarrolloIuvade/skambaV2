@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
+    type Lista,
     type Tarea,
     type EstadoProyecto,
     type Comentario,
@@ -15,6 +16,7 @@ import {
     skambaSubirArchivo,
     skambaEliminarArchivo,
     skambaConseguirArchivo,
+    skambaConseguirProyecto,
     skambaUsuarios,
     skambaVerTareas,
     skambaVerTarea,
@@ -28,6 +30,30 @@ interface TaskDetailPanelProps {
     estados: EstadoProyecto[];
     onClose: () => void;
     onUpdate: () => void;
+}
+
+function resolveEstadoId(
+    task: Partial<Tarea> & { est_ide?: string | number | null; est_nom?: string | null },
+    estados: EstadoProyecto[],
+) {
+    const byProjectStateId = task.tar_est ? String(task.tar_est) : '';
+    if (byProjectStateId && estados.some((estado) => String(estado.p_e_ide) === byProjectStateId)) {
+        return byProjectStateId;
+    }
+
+    const byBaseStateId = task.est_ide ? String(task.est_ide) : '';
+    if (byBaseStateId) {
+        const match = estados.find((estado) => String(estado.est_ide) === byBaseStateId);
+        if (match) return String(match.p_e_ide);
+    }
+
+    const byName = task.est_nom?.trim().toLowerCase();
+    if (byName) {
+        const match = estados.find((estado) => estado.est_nom.trim().toLowerCase() === byName);
+        if (match) return String(match.p_e_ide);
+    }
+
+    return String(estados[0]?.p_e_ide ?? '');
 }
 
 export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetailPanelProps) {
@@ -49,12 +75,13 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         '2': 'text-amber-500',
         '3': 'text-emerald-500',
     };
+    const [availableStates, setAvailableStates] = useState<EstadoProyecto[]>(estados ?? []);
 
     // Editable fields
     const [nombre, setNombre] = useState(tarea.tar_nom ?? '');
     const [descripcion, setDescripcion] = useState(tarea.tar_des || '');
     const [fecha, setFecha] = useState(tarea.tar_fch || '');
-    const [estadoId, setEstadoId] = useState(tarea.tar_est);
+    const [estadoId, setEstadoId] = useState(resolveEstadoId(tarea, estados));
     const [usuDesId, setUsuDesId] = useState(tarea.usu_des ?? '');
     const [priId, setPriId] = useState(tarea.pri_ide ?? '');
     const [tarPadId, setTarPadId] = useState(tarea.tar_pad ?? '');
@@ -91,10 +118,11 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
     }, [tarea.pro_ide, tarea.tar_ide]);
 
     useEffect(() => {
+        setAvailableStates(estados ?? []);
         setNombre(tarea.tar_nom ?? '');
         setDescripcion(tarea.tar_des || '');
         setFecha(tarea.tar_fch || '');
-        setEstadoId(tarea.tar_est);
+        setEstadoId(resolveEstadoId(tarea, estados));
 
         let resolvedUsuDesId = tarea.usu_des ? String(tarea.usu_des) : '';
         if (!resolvedUsuDesId && tarea.designado_nombre) {
@@ -105,12 +133,57 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
 
         setPriId(tarea.pri_ide ?? '');
         setTarPadId(tarea.tar_pad ?? '');
-    }, [tarea, usuarios]);
+    }, [tarea, usuarios, estados]);
+
+    useEffect(() => {
+        let active = true;
+
+        async function loadTaskDetail() {
+            try {
+                const res = await skambaVerTarea('', Number(tarea.tar_ide), Number(tarea.pro_ide));
+                if (!active || !res.success || !res.data) return;
+
+                const nextStates = res.estados && res.estados.length > 0 ? res.estados : estados;
+                setAvailableStates(nextStates);
+                setNombre(res.data.tar_nom ?? '');
+                setDescripcion(res.data.tar_des || '');
+                setFecha(res.data.tar_fch || '');
+                setEstadoId(resolveEstadoId(res.data, nextStates));
+
+                let resolvedUsuDesId = res.data.usu_des ? String(res.data.usu_des) : '';
+                if (!resolvedUsuDesId && res.data.designado_nombre) {
+                    const member = (res.miembros ?? []).find(m => m.usu_nom === res.data?.designado_nombre);
+                    if (member) resolvedUsuDesId = String(member.usu_ide);
+                }
+                setUsuDesId(resolvedUsuDesId);
+                setPriId(res.data.pri_ide ?? '');
+
+                if (res.miembros && res.miembros.length > 0) {
+                    setUsuarios(res.miembros as unknown as Usuario[]);
+                } else {
+                    const projectRes = await skambaConseguirProyecto('', Number(tarea.pro_ide));
+                    if (projectRes.success && projectRes.data && 'miembros' in projectRes.data) {
+                        setUsuarios(((projectRes.data as Lista).miembros ?? []) as unknown as Usuario[]);
+                    }
+                }
+            } catch {
+                if (!active) return;
+                setAvailableStates(estados ?? []);
+            }
+        }
+
+        void loadTaskDetail();
+
+        return () => {
+            active = false;
+        };
+    }, [tarea.tar_ide, tarea.pro_ide, estados]);
 
     // Eager load so tab badges appear immediately on panel open
     useEffect(() => {
         loadComments();
         loadFiles();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [tarea.tar_ide]);
 
     async function loadComments() {
@@ -254,13 +327,12 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
         } catch { /* ignore */ }
     }
 
-    const currentEstado = estados.find(e => e.p_e_ide === estadoId);
+    const currentEstado = availableStates.find(e => e.p_e_ide === estadoId);
 
     return (
-        <div className="fixed inset-0 bg-black/40 flex items-start justify-end z-50" onClick={onClose}>
+        <div className="fixed inset-0 bg-black/40 flex items-start justify-end z-50">
             <div
                 className={`h-full ${isMaximized ? 'w-full' : 'w-full max-w-3xl'} bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col animate-in slide-in-from-right transition-all duration-300`}
-                onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
@@ -286,7 +358,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                         <div className="space-y-4">
                                             {logs.map(log => {
                                                 const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
-                                                const estado = estados.find(e => String(e.p_e_ide) === String(log.tar_est));
+                                                const estado = availableStates.find(e => String(e.p_e_ide) === String(log.tar_est));
                                                 return (
                                                     <div key={log.t_e_ide} className="flex gap-2 text-left">
                                                         <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
@@ -364,7 +436,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                     <ol className="relative border-l border-zinc-200 dark:border-zinc-700 space-y-4">
                                         {logs.map(log => {
                                             const autor = usuarios.find(u => String(u.usu_ide) === String(log.usu_ide));
-                                            const estado = estados.find(e => String(e.p_e_ide) === String(log.tar_est));
+                                            const estado = availableStates.find(e => String(e.p_e_ide) === String(log.tar_est));
                                             return (
                                                 <li key={log.t_e_ide} className="ml-4">
                                                     <div className="absolute -left-1.5 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white dark:border-zinc-900" />
@@ -428,6 +500,11 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                     type="text"
                                     value={nombre}
                                     onChange={e => setNombre(e.target.value)}
+                                    onKeyDown={e => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                                            e.preventDefault();
+                                        }
+                                    }}
                                     className="w-full px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                 />
                             </div>
@@ -450,7 +527,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                         onChange={e => setEstadoId(e.target.value)}
                                         className="w-full px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     >
-                                        {estados.map(est => (
+                                        {availableStates.map(est => (
                                             <option key={est.p_e_ide} value={est.p_e_ide}>{est.est_nom}</option>
                                         ))}
                                     </select>
@@ -471,7 +548,7 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                         onChange={e => setPriId(e.target.value)}
                                         className="w-full px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                     >
-                                        <option value="">Sin prioridad</option>
+                                        <option className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800" value="">Sin prioridad</option>
                                         {priorityOptions.map((opt) => (
                                             <option key={opt.id} value={opt.id} className={opt.color}>
                                                 {opt.label}
@@ -564,6 +641,11 @@ export function TaskDetailPanel({ tarea, estados, onClose, onUpdate }: TaskDetai
                                         placeholder="Escribe un comentario..."
                                         value={newComment}
                                         onChange={e => setNewComment(e.target.value)}
+                                        onKeyDown={e => {
+                                            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                                                e.preventDefault();
+                                            }
+                                        }}
                                         className="flex-1 px-3 py-2 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     />
                                     <button

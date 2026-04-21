@@ -8,6 +8,15 @@ import { NavigationBar } from '../../components/NavigationBar';
 function DashboardContent({ children }: { children: React.ReactNode }) {
     const { selectedView, viewMode, setViewMode } = useDashboard();
 
+    // WARNING FOR FUTURE EDITS / LLMs:
+    // This layout is intentionally the persistent dashboard shell.
+    // The Sidebar must stay mounted here so changing workspace/project/view
+    // only swaps the main content and does not remount or fully reload
+    // the sidebar state (open nodes, cached selections, local UI state).
+    // Do not move <Sidebar /> into page-level components and do not key this
+    // shell by pathname, selectedView, workspace, or project identifiers.
+    // If navigation behavior changes, preserve this persistent mounting model.
+
     // Mostrar NavigationBar en vistas de space, folder y list
     const showNavigationBar = selectedView?.type === 'space' || selectedView?.type === 'folder' || selectedView?.type === 'list';
     const showViewControls = selectedView?.type === 'list';
@@ -36,6 +45,9 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
     return (
+        // WARNING FOR FUTURE EDITS / LLMs:
+        // DashboardProvider lives at layout level on purpose so dashboard
+        // navigation keeps shared state alive across page/content changes.
         <DashboardProvider>
             <DashboardContent>{children}</DashboardContent>
         </DashboardProvider>

@@ -1,16 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef, type DragEvent } from 'react';
-import { Flag, Download, Trash2, Loader2, FileIcon, History, Maximize2, Minimize2 } from 'lucide-react';
+import { Flag, Download, Trash2, Loader2, FileIcon, History, Maximize2, Minimize2, Play } from 'lucide-react';
 import {
-    type Tarea, type Lista, type EstadoProyecto, type Comentario, type Archivo,
-    skambaEditarTarea, skambaVerTarea,
+    type Tarea, type Lista, type EstadoProyecto, type Comentario, type Archivo, type Workspace,
+    skambaEditarTarea, skambaVerTarea, skambaCopiarTarea, skambaConseguirProyecto, skambaConseguirProyectos, skambaConseguirProyectosGrupoUsuarioPorUsuario,
     skambaTareaComentarios, skambaHacerComentario, skambaEliminarComentario,
     skambaConseguirArchivos, skambaSubirArchivo, skambaEliminarArchivo, skambaConseguirArchivo,
     skambaLogsTareas, type TareaLog,
 } from '../lib/api';
 import type { Miembro } from '../lib/types/grupo';
 import { QuillEditor } from './QuillEditor';
+import { getCookie } from 'cookies-next';
+import { useAuthStore } from '../context/useAuthStore';
 
 interface TaskDetailModalProps {
     tarea: Tarea;
@@ -27,14 +29,101 @@ const priorityOptions = [
     { id: '3', label: 'Baja', bg: '#10b981' },
 ];
 
+interface CopyDestinationOption {
+    pro_ide: string;
+    label: string;
+}
+
+function resolveEstadoId(
+    task: Partial<Tarea> & { est_ide?: string | number | null; est_nom?: string | null },
+    estados: EstadoProyecto[],
+) {
+    const byProjectStateId = task.tar_est ? String(task.tar_est) : '';
+    if (byProjectStateId && estados.some((estado) => String(estado.p_e_ide) === byProjectStateId)) {
+        return byProjectStateId;
+    }
+
+    const byBaseStateId = task.est_ide ? String(task.est_ide) : '';
+    if (byBaseStateId) {
+        const match = estados.find((estado) => String(estado.est_ide) === byBaseStateId);
+        if (match) return String(match.p_e_ide);
+    }
+
+    const byName = task.est_nom?.trim().toLowerCase();
+    if (byName) {
+        const match = estados.find((estado) => estado.est_nom.trim().toLowerCase() === byName);
+        if (match) return String(match.p_e_ide);
+    }
+
+    return String(estados[0]?.p_e_ide ?? '');
+}
+
+function collectPersonalListOptions(workspaces: Workspace[]): CopyDestinationOption[] {
+    const options: CopyDestinationOption[] = [];
+
+    for (const workspace of workspaces) {
+        for (const space of workspace.spaces ?? []) {
+            for (const list of space.contenido?.listas ?? []) {
+                options.push({
+                    pro_ide: String(list.pro_ide),
+                    label: `${workspace.pro_nom} / ${space.pro_nom} / ${list.pro_nom}`,
+                });
+            }
+
+            for (const folder of space.contenido?.folders ?? []) {
+                for (const list of folder.listas ?? []) {
+                    options.push({
+                        pro_ide: String(list.pro_ide),
+                        label: `${workspace.pro_nom} / ${space.pro_nom} / ${folder.pro_nom} / ${list.pro_nom}`,
+                    });
+                }
+            }
+        }
+    }
+
+    return options;
+}
+
+function collectGroupListOptions(nodes: unknown[], path: string[] = []): CopyDestinationOption[] {
+    const options: CopyDestinationOption[] = [];
+
+    for (const node of nodes ?? []) {
+        const current = (node ?? {}) as Record<string, unknown>;
+        const nodeName = String(current.pro_nom ?? 'Sin nombre');
+        const nextPath = [...path, nodeName];
+        const tip = String(current.pro_tip ?? '').toLowerCase();
+        const children = Array.isArray(current.children) ? current.children : [];
+
+        if (tip === 'list') {
+            options.push({
+                pro_ide: String(current.pro_ide ?? ''),
+                label: nextPath.join(' / '),
+            });
+        }
+
+        if (children.length > 0) {
+            options.push(...collectGroupListOptions(children, nextPath));
+        }
+    }
+
+    return options;
+}
+
 export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = [] }: TaskDetailModalProps) {
+    const { user, token } = useAuthStore();
+    const [availableStates, setAvailableStates] = useState<EstadoProyecto[]>(lista.estados ?? []);
     const [nombre, setNombre] = useState(tarea.tar_nom ?? '');
     const [descripcion, setDescripcion] = useState(tarea.tar_des ?? '');
-    const [estadoId, setEstadoId] = useState(String(tarea.tar_est ?? lista.estados[0]?.p_e_ide ?? ''));
+    const [estadoId, setEstadoId] = useState(resolveEstadoId(tarea, lista.estados));
     const [fecha, setFecha] = useState(tarea.tar_fch ?? '');
     const [usuDesId, setUsuDesId] = useState(tarea.usu_des ? String(tarea.usu_des) : '');
     const [priId, setPriId] = useState(tarea.pri_ide ? String(tarea.pri_ide) : '');
     const [saving, setSaving] = useState(false);
+    const [running, setRunning] = useState(false);
+    const [showRunSelector, setShowRunSelector] = useState(false);
+    const [copyOptions, setCopyOptions] = useState<CopyDestinationOption[]>([]);
+    const [copyOptionsLoading, setCopyOptionsLoading] = useState(false);
+    const [selectedCopyProjectId, setSelectedCopyProjectId] = useState('');
     const [isMaximized, setIsMaximized] = useState(false);
     const [taskLoading, setTaskLoading] = useState(true);
 
@@ -54,12 +143,18 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const selectedEstado = lista.estados.find(e => String(e.p_e_ide) === estadoId);
+    const selectedEstado = availableStates.find(e => String(e.p_e_ide) === estadoId);
     const selectedPriority = priorityOptions.find(p => p.id === priId) ?? priorityOptions[0];
 
 
 
     const initialized = useRef(false);
+
+    useEffect(() => {
+        if (miembros.length > 0) {
+            setUsuarios(miembros);
+        }
+    }, [miembros]);
 
     useEffect(() => {
         if (initialized.current) return;
@@ -68,12 +163,14 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
         const init = async () => {
             setTaskLoading(true);
             try {
-                const result = await skambaVerTarea('', Number(tarea.tar_ide));
+                const result = await skambaVerTarea('', Number(tarea.tar_ide), Number(lista.pro_ide ?? tarea.pro_ide));
                 if (result.success && result.data) {
                     const refreshed = result.data;
+                    const nextStates = result.estados && result.estados.length > 0 ? result.estados : lista.estados;
+                    setAvailableStates(nextStates);
                     setNombre(refreshed.tar_nom ?? '');
                     setDescripcion(refreshed.tar_des ?? '');
-                    setEstadoId(String(refreshed.tar_est ?? ''));
+                    setEstadoId(resolveEstadoId(refreshed, nextStates));
                     setFecha(refreshed.tar_fch ?? '');
 
                     let resolvedUsuDesId = refreshed.usu_des ? String(refreshed.usu_des) : '';
@@ -90,19 +187,40 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
 
                     setPriId(refreshed.pri_ide ? String(refreshed.pri_ide) : '');
 
-                    if (result.miembros) {
+                    if (result.miembros && result.miembros.length > 0) {
                         setUsuarios(result.miembros);
                     } else if (miembros && miembros.length > 0) {
                         setUsuarios(miembros);
+                    } else {
+                        const projectRes = await skambaConseguirProyecto('', Number(lista.pro_ide ?? tarea.pro_ide));
+                        if (projectRes.success && projectRes.data && 'miembros' in projectRes.data) {
+                            setUsuarios((projectRes.data as Lista).miembros ?? []);
+                        }
                     }
                 } else {
+                    setAvailableStates(lista.estados ?? []);
+                    setEstadoId(resolveEstadoId(tarea, lista.estados));
                     if (miembros && miembros.length > 0) {
                         setUsuarios(miembros);
+                    } else {
+                        const projectRes = await skambaConseguirProyecto('', Number(lista.pro_ide ?? tarea.pro_ide));
+                        if (projectRes.success && projectRes.data && 'miembros' in projectRes.data) {
+                            setUsuarios((projectRes.data as Lista).miembros ?? []);
+                        }
                     }
                 }
             } catch {
+                setAvailableStates(lista.estados ?? []);
+                setEstadoId(resolveEstadoId(tarea, lista.estados));
                 if (miembros && miembros.length > 0) {
                     setUsuarios(miembros);
+                } else {
+                    try {
+                        const projectRes = await skambaConseguirProyecto('', Number(lista.pro_ide ?? tarea.pro_ide));
+                        if (projectRes.success && projectRes.data && 'miembros' in projectRes.data) {
+                            setUsuarios((projectRes.data as Lista).miembros ?? []);
+                        }
+                    } catch { }
                 }
             } finally {
                 setTaskLoading(false);
@@ -114,6 +232,37 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
         init();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        const usuIde = user?.usu_ide;
+        if (!usuIde) return;
+
+        const loadCopyOptions = async () => {
+            setCopyOptionsLoading(true);
+            try {
+                const [personalRes, groupRes] = await Promise.all([
+                    skambaConseguirProyectos(token ?? ''),
+                    skambaConseguirProyectosGrupoUsuarioPorUsuario('', Number(usuIde)),
+                ]);
+
+                const personalOptions = personalRes.success ? collectPersonalListOptions(personalRes.data ?? []) : [];
+                const groupOptions = groupRes.success ? collectGroupListOptions(groupRes.data ?? []) : [];
+
+                const merged = [...personalOptions, ...groupOptions]
+                    .filter((opt) => opt.pro_ide)
+                    .filter((opt, index, arr) => arr.findIndex((item) => item.pro_ide === opt.pro_ide) === index)
+                    .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
+
+                setCopyOptions(merged);
+            } catch {
+                setCopyOptions([]);
+            } finally {
+                setCopyOptionsLoading(false);
+            }
+        };
+
+        void loadCopyOptions();
+    }, [token, user?.usu_ide]);
 
     async function loadLogs() {
         setLogsLoading(true);
@@ -158,6 +307,19 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
             onUpdate();
         } catch { }
         finally { setSaving(false); }
+    }
+
+    async function handleRun() {
+        if (running) return;
+        if (!selectedCopyProjectId) return;
+        setRunning(true);
+        try {
+            const cookieToken = getCookie('kamba_token') as string | undefined;
+            await skambaCopiarTarea(token ?? cookieToken ?? '', Number(tarea.tar_ide), Number(selectedCopyProjectId));
+            setShowRunSelector(false);
+            onUpdate();
+        } catch { }
+        finally { setRunning(false); }
     }
 
     async function handleAddComment() {
@@ -239,11 +401,9 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
     return (
         <div
             className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 transition-all duration-300"
-            onClick={onClose}
         >
             <div
                 className={`${isMaximized ? 'w-full h-full max-w-none max-h-none rounded-none' : 'w-full max-w-5xl max-h-[90vh] rounded-2xl'} bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-2xl flex flex-col border border-zinc-200/50 dark:border-zinc-800/50 overflow-hidden transition-all duration-500 ease-in-out relative animate-in fade-in zoom-in duration-300`}
-                onClick={e => e.stopPropagation()}
             >
                 {taskLoading && (
                     <div className="absolute inset-0 z-[60] bg-white/40 dark:bg-zinc-900/40 backdrop-blur-[2px] flex items-center justify-center transition-all duration-300">
@@ -266,7 +426,7 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
                             onChange={e => setEstadoId(e.target.value)}
                             className="text-sm font-bold bg-transparent border-0 focus:ring-0 outline-none text-white cursor-pointer"
                         >
-                            {lista.estados.map((est: EstadoProyecto) => (
+                            {availableStates.map((est: EstadoProyecto) => (
                                 <option key={est.p_e_ide} value={est.p_e_ide} className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800">{est.est_nom}</option>
                             ))}
                         </select>
@@ -290,6 +450,61 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
                             ))}
                         </select>
                     </div>
+
+                    <span className="text-zinc-200 dark:text-zinc-700 select-none text-lg">|</span>
+                    <div className="flex items-center gap-2 rounded-lg px-3 py-2 relative" >
+                        <button
+                            type="button"
+                            onClick={() => setShowRunSelector((prev) => !prev)}
+                            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors disabled:opacity-50 cursor-pointer z-[70]"
+                        >
+                            <Play className="w-4 h-4" />
+                            Copiar Tarea
+                        </button>
+                        {showRunSelector && (
+                            <div className="absolute left-0 top-full mt-1 w-[26rem] max-w-[70vw] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl p-3 z-[80] overflow-y-auto">
+                                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">
+                                    Copiar tarea a una lista
+                                </p>
+                                <select
+                                    value={selectedCopyProjectId}
+                                    onChange={(e) => setSelectedCopyProjectId(e.target.value)}
+                                    disabled={copyOptionsLoading || running}
+                                    className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                >
+                                    <option value="" className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800">
+                                        {copyOptionsLoading ? 'Cargando listas...' : 'Selecciona una lista destino'}
+                                    </option>
+                                    {copyOptions.map((option) => (
+                                        <option key={option.pro_ide} value={option.pro_ide}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="mt-3 flex items-center justify-end gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowRunSelector(false)}
+                                        className="px-3 py-2 text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleRun}
+                                        disabled={running || copyOptionsLoading || !selectedCopyProjectId}
+                                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                    >
+                                        {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                        {running ? 'Copiando...' : 'Iniciar'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+
+                    </div>
+
 
                     <span className="text-zinc-200 dark:text-zinc-700 select-none text-lg">|</span>
 
@@ -388,9 +603,9 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
                                     onChange={e => setUsuDesId(e.target.value)}
                                     className="w-full text-sm bg-transparent border-0 focus:ring-0 outline-none text-zinc-700 dark:text-zinc-300 cursor-pointer"
                                 >
-                                    <option value="">Sin asignar</option>
+                                    <option className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800" value="">Sin asignar</option>
                                     {usuarios.map(u => (
-                                        <option key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
+                                        <option className="text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800" key={u.usu_ide} value={String(u.usu_ide)}>{u.usu_nom}</option>
                                     ))}
                                 </select>
                             </div>
@@ -542,6 +757,11 @@ export function TaskDetailModal({ tarea, lista, onClose, onUpdate, miembros = []
                             <textarea
                                 value={nuevoComentario}
                                 onChange={e => setNuevoComentario(e.target.value)}
+                                onKeyDown={e => {
+                                    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                                        e.preventDefault();
+                                    }
+                                }}
                                 placeholder="Escribe un comentario..."
                                 rows={3}
                                 className="w-full text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 bg-transparent focus:outline-none focus:ring-1 focus:ring-indigo-400 text-zinc-700 dark:text-zinc-300 resize-none"
